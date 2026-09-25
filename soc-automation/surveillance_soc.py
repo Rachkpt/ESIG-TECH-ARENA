@@ -28,9 +28,12 @@ from soc_utils import (
     is_alert_processed, mark_alert_processed, get_processed_set, commit_processed_ids,
     block_ip, add_log, telegram_send, inline_keyboard,
     get_remaining_time, fail2ban_block, load_state, save_state,
-    should_alert, clear_throttle, record_native_block, check_expired_blocks
+    should_alert, clear_throttle, record_native_block, check_expired_blocks,
+    add_pending_decision, bump_sector_stat
 )
 from soc_clients import wazuh, thehive, mail
+import soc_assets as assets
+from soc_assets import Criticality, sector_emoji, sector_label
 
 log = logging.getLogger("script1")
 
@@ -203,6 +206,27 @@ def process_network_alert(alert: WazuhAlert):
     if alert.category not in ACTIONABLE_CATEGORIES:
         return
 
+    # ══════════════════════════════════════════════════════════
+    #  RÉPONSE GRADUÉE SELON LA CRITICITÉ (infrastructures critiques)
+    #  On identifie l'équipement concerné (source OU cible) et sa
+    #  criticité. Sur un équipement CRITIQUE, on NE bloque JAMAIS
+    #  automatiquement (couper un service vital pourrait être pire que
+    #  l'attaque) : on demande une validation humaine sur Telegram.
+    # ══════════════════════════════════════════════════════════
+    target_asset, secteur, crit = _assess_targets(alert)
+    alert.sector = secteur
+    bump_sector_stat(secteur, "alerts")
+
+    # Équipement critique (ou attaque industrielle ICS) → l'humain décide
+    if crit is Criticality.CRITIQUE or alert.category == AlertCategory.ICS_ATTACK:
+        request_human_validation(alert, target_asset, secteur, crit)
+        return
+
+    # Équipement sensible → blocage automatique mais de COURTE durée
+    # (isolable temporairement sans couper durablement le service).
+    if crit is Criticality.SENSIBLE:
+        alert.block_duration = min(Config.BLOCK_DURATION, 900)  # 15 min max
+
     # ── IP PRIVÉE → BLOCAGE IMMÉDIAT ──────────────────────
     if alert.is_private_source:
         process_private_ip(alert)
@@ -210,6 +234,94 @@ def process_network_alert(alert: WazuhAlert):
 
     # ── IP PUBLIQUE → CASE THEHIVE ────────────────────────
     process_public_ip(alert)
+
+
+def _assess_targets(alert: WazuhAlert):
+    """
+    Détermine l'équipement concerné par l'alerte et le niveau de
+    criticité à appliquer. On regarde à la fois la CIBLE (dst_ip /
+    agent) et la SOURCE (src_ip) : si l'une des deux est un équipement
+    critique connu, c'est ce niveau qui prime — bloquer l'IP d'un
+    équipement critique (faux positif) pourrait couper un service vital.
+
+    Retourne (asset_à_afficher, secteur, criticité_max).
+    """
+    dst_asset = assets.lookup(dst_ip=alert.dst_ip, agent_name=alert.agent_name)
+    src_asset = assets.lookup(dst_ip=alert.src_ip)
+
+    # Secteur d'affichage : on privilégie un secteur connu (cible puis source)
+    if dst_asset.secteur != "inconnu":
+        display_asset, secteur = dst_asset, dst_asset.secteur
+    elif src_asset.secteur != "inconnu":
+        display_asset, secteur = src_asset, src_asset.secteur
+    else:
+        display_asset, secteur = dst_asset, "inconnu"
+
+    order = {Criticality.STANDARD: 1, Criticality.SENSIBLE: 2, Criticality.CRITIQUE: 3}
+    crit = max(dst_asset.criticite, src_asset.criticite, key=lambda c: order[c])
+    return display_asset, secteur, crit
+
+
+def request_human_validation(alert: WazuhAlert, asset, secteur: str, crit: Criticality):
+    """
+    Équipement critique : on NE bloque pas automatiquement. On enregistre
+    une décision en attente et on notifie l'admin avec deux boutons
+    (Bloquer l'attaquant / Ignorer). La décision est traitée par
+    telegram_bot.py (callbacks approve_/reject_).
+    """
+    ip = alert.src_ip
+    category_name = DETECTION_RULES.get(alert.category, {}).get("description", alert.category.value)
+    ts = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    emoji = sector_emoji(secteur)
+    slabel = sector_label(secteur)
+    cible = asset.nom or alert.agent_name or alert.dst_ip or "N/A"
+
+    # Anti-spam : une relance par (catégorie, IP) par 30 min max
+    throttle_key = f"pending:{alert.category.value}:{ip}"
+    if not should_alert(throttle_key, window_seconds=1800):
+        return
+
+    dec_id = add_pending_decision({
+        "ip": ip,
+        "dst_ip": alert.dst_ip,
+        "agent": alert.agent_name,
+        "asset_nom": asset.nom,
+        "secteur": secteur,
+        "criticite": crit.value,
+        "category": alert.category.value,
+        "reason": f"{category_name} — {alert.rule_description}",
+        "rule_level": alert.rule_level,
+    })
+    bump_sector_stat(secteur, "pending")
+
+    buttons = inline_keyboard([
+        [("✅ Bloquer l'attaquant", f"approve_{dec_id}"),
+         ("❌ Ignorer (faux positif)", f"reject_{dec_id}")],
+    ])
+
+    is_ics = alert.category == AlertCategory.ICS_ATTACK
+    entete = "🏭 <b>[ALERTE ICS/SCADA]</b>" if is_ics else f"🚨 <b>[{crit.label()}]</b>"
+
+    telegram_send(
+        f"{entete} {emoji} {slabel}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Équipement : <b>{cible}</b> ({crit.emoji()} {crit.label()})\n"
+        f"🌐 Source : <code>{ip or 'N/A'}</code>\n"
+        f"🖥️ Cible : <code>{alert.dst_ip or alert.agent_name or 'N/A'}</code>\n"
+        f"📌 {category_name}\n"
+        f"📝 Règle : {alert.rule_description}\n"
+        f"⚠️ Niveau : {alert.rule_level}/15\n"
+        f"🕐 {ts}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⛔ <b>Blocage automatique DÉSACTIVÉ</b> sur cet équipement critique\n"
+        f"   (préserver la continuité du service vital).\n"
+        f"👉 <b>Décision requise :</b>",
+        buttons=buttons,
+        force=True
+    )
+    add_log("VALIDATION_REQUISE",
+            f"{category_name} sur {cible} — attente décision admin (#{dec_id})",
+            ip, alert.category.value)
 
 
 def process_private_ip(alert: WazuhAlert):
@@ -253,17 +365,19 @@ def process_private_ip(alert: WazuhAlert):
         )
         return
 
-    # Blocage
+    # Blocage (durée réduite pour un équipement "sensible", cf. réponse graduée)
     blocked = block_ip(
         ip=ip,
         reason=f"{category_name} — {alert.rule_description}",
+        duration=alert.block_duration,
         source="wazuh-script1",
         category=alert.category.value
     )
-    
+
     if not blocked:
         return
 
+    bump_sector_stat(alert.sector, "blocked")
     add_log(
         "BLOQUE_PRIVE",
         f"{category_name} — {alert.rule_description}",

@@ -202,6 +202,7 @@ class AlertCategory(Enum):
     RECON = "recon"
     EXPLOIT = "exploit"
     THREAT_REMOVED = "threat_removed"
+    ICS_ATTACK = "ics_attack"
     OTHER = "other"
 
 
@@ -219,6 +220,7 @@ ACTIONABLE_CATEGORIES = {
     AlertCategory.RECON,
     AlertCategory.EXPLOIT,
     AlertCategory.THREAT_REMOVED,
+    AlertCategory.ICS_ATTACK,
 }
 
 # Catégories désormais bloquées NATIVEMENT par Wazuh active-response
@@ -271,6 +273,9 @@ class WazuhAlert:
     data: dict
     category: AlertCategory = AlertCategory.OTHER
     severity: Severity = Severity.LOW
+    # Enrichissement "infrastructures critiques" (rempli par surveillance_soc)
+    sector: str = "inconnu"
+    block_duration: Optional[int] = None  # override durée blocage (secteur sensible)
 
     def __post_init__(self):
         self.severity = Severity.from_wazuh_level(self.rule_level)
@@ -445,12 +450,17 @@ class SOCState:
         "total_cases_public": 0,
         "total_malware": 0,
         "total_bruteforce": 0,
+        "total_ics": 0,
+        "by_sector": {},   # secteur -> {"alerts","blocked","pending","validations"}
         "last_reset": datetime.now().strftime("%Y-%m-%d")
     })
     silence_until: Optional[str] = None
     report_requested: bool = False
     processed_alerts: list = field(default_factory=list)
     alert_throttle: dict = field(default_factory=dict)
+    # File des décisions en attente de validation humaine (équipements
+    # critiques : le SOC ne bloque PAS tout seul, il demande à l'admin).
+    pending_decisions: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -462,7 +472,8 @@ class SOCState:
             "silence_until": self.silence_until,
             "report_requested": self.report_requested,
             "processed_alerts": self.processed_alerts[-10000:],
-            "alert_throttle": self.alert_throttle
+            "alert_throttle": self.alert_throttle,
+            "pending_decisions": self.pending_decisions[-200:]
         }
 
 
@@ -606,6 +617,24 @@ DETECTION_RULES = {
         "wazuh_groups": ["active-response", "active_response", "active response"],
         "min_level": 3,
         "description": "Menace supprimée automatiquement"
+    },
+
+    # ── 10. ATTAQUE ICS / SCADA / OT (Modbus, DNP3...) ────
+    # Ciblée sur les infrastructures critiques industrielles (CEET).
+    # Les règles Suricata dédiées (rules/soc-ics.rules) émettent des
+    # messages contenant "MODBUS"/"SCADA"/"ICS"/"DNP3".
+    AlertCategory.ICS_ATTACK: {
+        "keywords": [
+            "modbus", "scada", "dnp3", "s7comm", "iec-104", "iec104",
+            "plc", "automate", "ics ", "ot attack", "ot-attack",
+            "unauthorized write", "ecriture non autorisee", "écriture non autorisée",
+            "coil write", "register write", "force listen only",
+            "restart communication", "unauthorized command"
+        ],
+        "suricata_categories": ["ics-attack", "scada", "modbus"],
+        "wazuh_groups": ["ics", "scada", "modbus", "ot"],
+        "min_level": 3,
+        "description": "Attaque système industriel (ICS/SCADA)"
     }
 }
 
@@ -627,9 +656,22 @@ def classify_alert(alert: WazuhAlert) -> AlertCategory:
             if keyword in desc_lower:
                 return AlertCategory.THREAT_REMOVED
 
+    # PRIORITÉ : attaque ICS/SCADA prime aussi (le mot "scan"/"command"
+    # d'une alerte Modbus matcherait sinon NETWORK_SCAN/EXPLOIT en premier).
+    ics_rules = DETECTION_RULES[AlertCategory.ICS_ATTACK]
+    for sc in ics_rules.get("suricata_categories", []):
+        if sc in suricata_cat:
+            return AlertCategory.ICS_ATTACK
+    for wg in ics_rules.get("wazuh_groups", []):
+        if any(wg in g for g in groups_lower):
+            return AlertCategory.ICS_ATTACK
+    for keyword in ics_rules["keywords"]:
+        if keyword in desc_lower:
+            return AlertCategory.ICS_ATTACK
+
     for category, rules in DETECTION_RULES.items():
-        if category == AlertCategory.THREAT_REMOVED:
-            continue  # déjà testé ci-dessus
+        if category in (AlertCategory.THREAT_REMOVED, AlertCategory.ICS_ATTACK):
+            continue  # déjà testés ci-dessus (priorité)
         if alert.rule_level < rules["min_level"]:
             continue
         # Match suricata category
@@ -653,7 +695,8 @@ def get_severity_for_category(category: AlertCategory, base_level: int) -> Sever
     severity = Severity.from_wazuh_level(base_level)
     
     # Boosts pour certaines catégories
-    if category in (AlertCategory.MALWARE, AlertCategory.REVERSE_SHELL, AlertCategory.EXPLOIT):
+    if category in (AlertCategory.MALWARE, AlertCategory.REVERSE_SHELL,
+                    AlertCategory.EXPLOIT, AlertCategory.ICS_ATTACK):
         if severity.value < Severity.CRITICAL.value:
             severity = Severity.CRITICAL
     elif category in (AlertCategory.NETWORK_SCAN, AlertCategory.DDOS):

@@ -770,6 +770,108 @@ def get_remaining_time(ip: str) -> str:
 
 
 # ╔══════════════════════════════════════════════════════════╗
+# ║   STATS PAR SECTEUR (SOC multi-infrastructures)         ║
+# ╚══════════════════════════════════════════════════════════╝
+
+def bump_sector_stat(secteur: str, key: str, n: int = 1):
+    """Incrémente un compteur pour un secteur (alerts/blocked/pending/validations)."""
+    secteur = (secteur or "inconnu").lower()
+    state = load_state()
+    by_sector = state["stats"].setdefault("by_sector", {})
+    entry = by_sector.setdefault(secteur, {"alerts": 0, "blocked": 0,
+                                           "pending": 0, "validations": 0})
+    entry[key] = entry.get(key, 0) + n
+    save_state(state)
+
+
+def get_sector_stats() -> dict:
+    """Retourne les stats agrégées par secteur."""
+    return load_state()["stats"].get("by_sector", {})
+
+
+# ╔══════════════════════════════════════════════════════════╗
+# ║   DÉCISIONS EN ATTENTE (validation humaine — critique)  ║
+# ╚══════════════════════════════════════════════════════════╝
+#
+# Pour un équipement CRITIQUE, le SOC ne bloque pas automatiquement :
+# il enregistre une "décision en attente" et notifie l'admin sur Telegram
+# avec deux boutons (Bloquer / Ignorer). Les 3 process partagent cette
+# file via soc_state.json — surveillance_soc.py écrit, telegram_bot.py
+# résout. La disponibilité prime : ne JAMAIS couper un service vital sans
+# accord humain.
+
+def add_pending_decision(dec: dict) -> str:
+    """
+    Enregistre une décision en attente et retourne son id.
+    `dec` doit contenir au minimum: ip, category, reason. Les autres
+    champs (dst_ip, agent, asset_nom, secteur, criticite, rule_level)
+    sont optionnels mais recommandés pour l'affichage.
+    """
+    import time as _t
+    dec_id = f"dec_{int(_t.time()*1000)}"
+    entry = {
+        "id": dec_id,
+        "ip": dec.get("ip", ""),
+        "dst_ip": dec.get("dst_ip", ""),
+        "agent": dec.get("agent", ""),
+        "asset_nom": dec.get("asset_nom", ""),
+        "secteur": dec.get("secteur", "inconnu"),
+        "criticite": dec.get("criticite", "critique"),
+        "category": dec.get("category", ""),
+        "reason": dec.get("reason", "")[:200],
+        "rule_level": dec.get("rule_level", 0),
+        "created_at": datetime.now().isoformat(),
+        "status": "pending",
+        "reminders": 0,
+    }
+    state = load_state()
+    # Anti-doublon : une seule décision pending par (ip, category)
+    for d in state.get("pending_decisions", []):
+        if (d.get("status") == "pending" and d.get("ip") == entry["ip"]
+                and d.get("category") == entry["category"]):
+            return d["id"]
+    state.setdefault("pending_decisions", []).append(entry)
+    state["pending_decisions"] = state["pending_decisions"][-200:]
+    save_state(state)
+    add_log("ATTENTE_VALIDATION",
+            f"{entry['category']} sur {entry['asset_nom'] or entry['agent'] or entry['dst_ip']} "
+            f"— décision humaine requise", entry["ip"], entry["category"])
+    return dec_id
+
+
+def get_pending_decisions() -> list:
+    """Retourne les décisions encore en attente (status == pending)."""
+    state = load_state()
+    return [d for d in state.get("pending_decisions", []) if d.get("status") == "pending"]
+
+
+def get_pending_decision(dec_id: str) -> Optional[dict]:
+    state = load_state()
+    for d in state.get("pending_decisions", []):
+        if d.get("id") == dec_id:
+            return d
+    return None
+
+
+def resolve_pending_decision(dec_id: str, status: str, by: str = "admin") -> Optional[dict]:
+    """
+    Marque une décision comme traitée (status: 'approved' | 'rejected').
+    Retourne la décision mise à jour, ou None si introuvable / déjà traitée.
+    """
+    state = load_state()
+    for d in state.get("pending_decisions", []):
+        if d.get("id") == dec_id:
+            if d.get("status") != "pending":
+                return None  # déjà résolue (double-clic)
+            d["status"] = status
+            d["resolved_at"] = datetime.now().isoformat()
+            d["resolved_by"] = by
+            save_state(state)
+            return d
+    return None
+
+
+# ╔══════════════════════════════════════════════════════════╗
 # ║                      TELEGRAM                            ║
 # ╚══════════════════════════════════════════════════════════╝
 

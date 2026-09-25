@@ -18,9 +18,12 @@ from soc_utils import (
     block_ip, unblock_ip, prolong_block, ban_permanent,
     add_to_whitelist, get_remaining_time,
     telegram_send, inline_keyboard, reply_keyboard, check_expired_blocks,
-    firewall_list_blocked, get_native_blocks
+    firewall_list_blocked, get_native_blocks,
+    get_pending_decisions, get_pending_decision, resolve_pending_decision,
+    bump_sector_stat, get_sector_stats
 )
 from soc_clients import wazuh, thehive, cortex
+from soc_assets import sector_emoji, sector_label, all_assets, Criticality
 
 log = logging.getLogger("telegram_bot")
 API = f"https://api.telegram.org/bot{Config.TELEGRAM_TOKEN}"
@@ -84,6 +87,8 @@ def main_menu():
          ("🐝 Cases TheHive", "cmd_cases")],
         [("🧠 Rapport IA", "cmd_report"),
          ("🖥️ Agents", "cmd_agents")],
+        [("⏳ Décisions en attente", "cmd_pending"),
+         ("🏢 Secteurs", "cmd_sectors")],
         [("🔍 Analyser IP", "cmd_analyze_prompt"),
          ("📁 Créer Case", "cmd_case_prompt")],
         [("🔇 Silence 30min", "cmd_silence30")]
@@ -106,6 +111,8 @@ def main_menu():
         "<code>/alerts</code> — 10 dernières alertes\n"
         "<code>/scan</code> — IPs ping/nmap\n"
         "<code>/malicious</code> — IPs malveillantes\n"
+        "<code>/attente</code> — Décisions à valider (critique)\n"
+        "<code>/secteurs</code> — SOC par secteur\n"
         "<code>/silence MIN</code> — Couper notifs\n"
         "<code>/check</code> — Vérifier expirations\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -487,6 +494,121 @@ def cmd_malicious_ips():
 
 
 # ╔══════════════════════════════════════════════════════════╗
+# ║      INFRASTRUCTURES CRITIQUES : ATTENTE & SECTEURS     ║
+# ╚══════════════════════════════════════════════════════════╝
+
+def cmd_pending():
+    """Liste les décisions en attente de validation humaine."""
+    pend = get_pending_decisions()
+    if not pend:
+        telegram_send("✅ Aucune décision en attente de validation.")
+        return
+    for d in pend[-10:]:
+        emoji = sector_emoji(d.get("secteur", "inconnu"))
+        buttons = inline_keyboard([
+            [("✅ Bloquer l'attaquant", f"approve_{d['id']}"),
+             ("❌ Ignorer", f"reject_{d['id']}")],
+        ])
+        telegram_send(
+            f"⏳ <b>DÉCISION EN ATTENTE</b> {emoji} {sector_label(d.get('secteur',''))}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 Équipement : <b>{d.get('asset_nom') or d.get('agent') or d.get('dst_ip') or 'N/A'}</b> "
+            f"({d.get('criticite','?').upper()})\n"
+            f"🌐 Source : <code>{d.get('ip','N/A')}</code>\n"
+            f"📌 {d.get('reason','')[:150]}\n"
+            f"🕐 {d.get('created_at','')[:19].replace('T',' ')}",
+            buttons=buttons
+        )
+
+
+def cmd_sectors():
+    """Tableau de bord par secteur d'infrastructure critique."""
+    stats = get_sector_stats()
+    pend = get_pending_decisions()
+    pend_by_sector = {}
+    for d in pend:
+        pend_by_sector[d.get("secteur", "inconnu")] = pend_by_sector.get(d.get("secteur", "inconnu"), 0) + 1
+
+    # Secteurs connus depuis l'inventaire + ceux vus dans les stats
+    secteurs = sorted(set(list(stats.keys()) + [a.secteur for a in all_assets()]))
+    if not secteurs:
+        telegram_send("ℹ️ Aucun secteur configuré (voir assets.yml).")
+        return
+
+    lines = ["🏢 <b>SOC MULTI-SECTEURS</b>", "━━━━━━━━━━━━━━━━━━━━━━━━"]
+    for s in secteurs:
+        st = stats.get(s, {})
+        lines.append(
+            f"{sector_emoji(s)} <b>{sector_label(s)}</b>\n"
+            f"   🔔 Alertes : {st.get('alerts',0)} | "
+            f"⛔ Bloqués : {st.get('blocked',0)}\n"
+            f"   ⏳ En attente : {pend_by_sector.get(s,0)} | "
+            f"✅ Validations : {st.get('validations',0)}"
+        )
+    # Inventaire résumé
+    assets_list = all_assets()
+    if assets_list:
+        crit = sum(1 for a in assets_list if a.criticite is Criticality.CRITIQUE)
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"📋 Parc : {len(assets_list)} équipements ({crit} critiques)")
+    telegram_send("\n".join(lines))
+
+
+def _apply_decision(dec_id: str, approve: bool):
+    """Traite la validation humaine d'une décision en attente."""
+    d = get_pending_decision(dec_id)
+    if not d:
+        telegram_send("⚠️ Décision introuvable (expirée ?).")
+        return
+    if d.get("status") != "pending":
+        telegram_send(f"ℹ️ Décision déjà traitée ({d.get('status')}).")
+        return
+
+    ip = d.get("ip", "")
+    secteur = d.get("secteur", "inconnu")
+    cible = d.get("asset_nom") or d.get("agent") or d.get("dst_ip") or "N/A"
+
+    if not approve:
+        resolve_pending_decision(dec_id, "rejected", by="admin")
+        add_log("FAUX_POSITIF", f"{d.get('category','')} sur {cible} ignoré par admin", ip, d.get("category",""))
+        telegram_send(
+            f"❌ <b>IGNORÉ (faux positif)</b>\n"
+            f"🎯 {cible} | 🌐 <code>{ip}</code>\n"
+            f"📝 Aucune action — journalisé."
+        )
+        return
+
+    # Validation → on bloque l'attaquant (local + Wazuh AR sur les agents)
+    if not is_valid_ip(ip):
+        resolve_pending_decision(dec_id, "approved", by="admin")
+        telegram_send(f"⚠️ IP source invalide (<code>{ip}</code>) — décision close sans blocage.")
+        return
+
+    ok = block_ip(ip, f"Validé par admin — {d.get('reason','')}", source="admin-validation",
+                  category=d.get("category", ""))
+    resolve_pending_decision(dec_id, "approved", by="admin")
+    bump_sector_stat(secteur, "validations")
+    if ok:
+        bump_sector_stat(secteur, "blocked")
+
+    msg = (
+        f"✅ <b>BLOCAGE VALIDÉ</b> {sector_emoji(secteur)} {sector_label(secteur)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Équipement : <b>{cible}</b>\n"
+        f"🌐 Attaquant : <code>{ip}</code>\n"
+    )
+    msg += f"   ✔ Blocage local ({Config.FIREWALL_BACKEND} + fail2ban)\n" if ok \
+           else "   ⚠️ Déjà bloquée ou échec local (voir logs)\n"
+    if Config.WAZUH_AR_ON_MANUAL_BLOCK:
+        if wazuh.run_active_response(ip):
+            msg += "   ✔ firewall-drop Wazuh déclenché sur les agents actifs\n"
+        else:
+            msg += "   ⚠️ firewall-drop Wazuh non déclenché (voir logs)\n"
+    add_log("VALIDATION_APPROUVEE", f"{d.get('category','')} sur {cible} — blocage validé", ip, d.get("category",""))
+    telegram_send(msg)
+
+
+# ╔══════════════════════════════════════════════════════════╗
 # ║                     DISPATCH                             ║
 # ╚══════════════════════════════════════════════════════════╝
 
@@ -512,6 +634,10 @@ def handle_command(text: str, chat_id):
         "/scan": cmd_scan_attempts,
         "/malicious": cmd_malicious_ips,
         "/agents": cmd_agents,
+        "/attente": cmd_pending,
+        "/secteurs": cmd_sectors,
+        "⏳ Décisions en attente": cmd_pending,
+        "🏢 Secteurs": cmd_sectors,
         # Labels du clavier permanent (texte exact envoyé par Telegram au clic)
         "⚠️ 10 Dernières Alertes": cmd_alerts,
         "🔍 IPs Ping & NMAP": cmd_scan_attempts,
@@ -578,6 +704,8 @@ def handle_callback(data: str, chat_id, cb_id):
         "cmd_scan_attempts": cmd_scan_attempts,
         "cmd_malicious_ips": cmd_malicious_ips,
         "cmd_agents": cmd_agents,
+        "cmd_pending": cmd_pending,
+        "cmd_sectors": cmd_sectors,
         "cmd_silence30": lambda: cmd_silence(30),
         "cmd_analyze_prompt": lambda: telegram_send("🔍 Envoyez: /analyze IP"),
         "cmd_case_prompt": lambda: telegram_send("📁 Envoyez: /createcase IP"),
@@ -585,6 +713,10 @@ def handle_callback(data: str, chat_id, cb_id):
 
     if data in actions:
         actions[data]()
+    elif data.startswith("approve_"):
+        _apply_decision(data[8:], approve=True)
+    elif data.startswith("reject_"):
+        _apply_decision(data[7:], approve=False)
     elif data == "unblock_all":
         state = load_state()
         for ip in list(state["blocked_ips"].keys()):

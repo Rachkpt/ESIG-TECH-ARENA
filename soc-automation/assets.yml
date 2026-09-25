@@ -1,0 +1,98 @@
+# ══════════════════════════════════════════════════════════════════
+#  assets.yml — Inventaire des équipements des infrastructures critiques
+# ══════════════════════════════════════════════════════════════════
+#
+#  Ce fichier décrit le PARC surveillé par le SOC. Chaque équipement est
+#  rattaché à un SECTEUR (santé, banque, énergie...) et à un niveau de
+#  CRITICITÉ qui détermine COMMENT le SOC réagit à une attaque le visant.
+#
+#  ┌─────────────┬──────────────────────────────────────────────────┐
+#  │ Criticité   │ Réponse du SOC en cas d'attaque                    │
+#  ├─────────────┼──────────────────────────────────────────────────┤
+#  │ standard    │ Blocage automatique immédiat (comportement legacy) │
+#  │ sensible    │ Blocage auto court + alerte prioritaire            │
+#  │ critique    │ AUCUN blocage auto — validation humaine Telegram   │
+#  └─────────────┴──────────────────────────────────────────────────┘
+#
+#  Le rattachement se fait par IP OU par nom d'agent Wazuh (agent_name).
+#  Un équipement peut déclarer plusieurs IP (liste). L'IP source d'une
+#  attaque (l'attaquant) N'EST PAS ici — on décrit les CIBLES à protéger.
+#
+#  Astuce démo : mets tes 3 VM (hôpital, banque, CEET) ici avec leurs
+#  vraies IP de lab, et le SOC les étiquettera automatiquement.
+# ══════════════════════════════════════════════════════════════════
+
+# Politique appliquée quand une cible n'est PAS dans l'inventaire.
+# On reste sur le comportement historique (blocage auto) pour ne rien
+# casser sur un parc non décrit.
+defaut:
+  secteur: inconnu
+  criticite: standard
+
+equipements:
+
+  # ── 🏥 SECTEUR SANTÉ (hôpital) ──────────────────────────────────
+  - nom: Serveur dossiers patients (DPI)
+    ips: [192.168.20.10]
+    agent: hopital-dpi
+    secteur: sante
+    criticite: critique
+    description: Base de données des dossiers patients — indisponibilité = risque vital
+
+  - nom: Station imagerie médicale (PACS)
+    ips: [192.168.20.11]
+    agent: hopital-pacs
+    secteur: sante
+    criticite: critique
+    description: Serveur d'imagerie (radios, IRM)
+
+  - nom: Poste administratif accueil
+    ips: [192.168.20.50]
+    agent: hopital-accueil
+    secteur: sante
+    criticite: standard
+    description: Poste bureautique — blocage automatique sans risque
+
+  # ── 🏦 SECTEUR BANCAIRE ─────────────────────────────────────────
+  - nom: Serveur transactions bancaires
+    ips: [192.168.30.10]
+    agent: banque-core
+    secteur: banque
+    criticite: critique
+    description: Cœur transactionnel — soumis à conformité PCI DSS
+
+  - nom: Serveur web e-banking
+    ips: [192.168.30.20]
+    agent: banque-web
+    secteur: banque
+    criticite: sensible
+    description: Front web clients — exposé, mais isolable temporairement
+
+  - nom: Poste guichet agence
+    ips: [192.168.30.25]
+    agent: banque-guichet
+    secteur: banque
+    criticite: standard
+    description: Poste agent — blocage automatique
+
+  # ── ⚡ SECTEUR ÉNERGIE (CEET) ───────────────────────────────────
+  - nom: Automate poste Lomé-Nord (PLC Modbus)
+    ips: [192.168.10.50]
+    agent: ceet-plc-lome-nord
+    secteur: energie
+    criticite: critique
+    description: Automate SCADA pilotant les disjoncteurs — un blocage réseau intempestif peut couper l'alimentation
+
+  - nom: Poste de supervision SCADA (HMI)
+    ips: [192.168.10.10]
+    agent: ceet-scada-hmi
+    secteur: energie
+    criticite: critique
+    description: Interface homme-machine légitime — SEULE source autorisée à écrire sur les automates
+
+  - nom: Serveur historian (données de production)
+    ips: [192.168.10.30]
+    agent: ceet-historian
+    secteur: energie
+    criticite: sensible
+    description: Historisation des mesures électriques
