@@ -1,0 +1,67 @@
+# ══════════════════════════════════════════════════════════════════
+#  soc-infra-critique.rules — Règles custom SOC pour infrastructures
+#  critiques (santé 🏥 / banque 🏦 / énergie ⚡)
+# ══════════════════════════════════════════════════════════════════
+#
+#  Complète soc-custom.rules (scans Nmap) et soc-ics.rules (Modbus).
+#  SID réservés : 3400040–3400069 (pas de collision avec l'existant).
+#
+#  Ces règles ciblent les menaces les plus courantes sur les SI
+#  hospitaliers, bancaires et énergétiques : brute force sur les accès
+#  distants, protocoles non chiffrés hérités, accès direct aux bases de
+#  données, exfiltration DNS et vers/exploits SMB.
+#
+#  Toutes utilisent `threshold` pour ne déclencher qu'au-delà d'un seuil
+#  (évite le bruit d'une connexion isolée légitime).
+# ══════════════════════════════════════════════════════════════════
+
+# ── 1. BRUTE FORCE ACCÈS DISTANTS ─────────────────────────────────
+# RDP (port 3389) — très ciblé sur les postes hospitaliers/bancaires Windows
+alert tcp any any -> $HOME_NET 3389 (msg:"POSSBL BRUTE FORCE RDP"; flow:to_server; flags:S; threshold:type both, track by_src, count 10, seconds 30; classtype:attempted-recon; sid:3400040; priority:2; rev:1;)
+
+# FTP (port 21) — transfert de fichiers, souvent laissé ouvert
+alert tcp any any -> $HOME_NET 21 (msg:"POSSBL BRUTE FORCE FTP"; flow:to_server; flags:S; threshold:type both, track by_src, count 10, seconds 30; classtype:attempted-recon; sid:3400041; priority:2; rev:1;)
+
+# SMTP (port 25/587) — brute force sur la messagerie
+alert tcp any any -> $HOME_NET [25,587] (msg:"POSSBL BRUTE FORCE SMTP"; flow:to_server; flags:S; threshold:type both, track by_src, count 15, seconds 60; classtype:attempted-recon; sid:3400042; priority:3; rev:1;)
+
+# ── 2. PROTOCOLES NON CHIFFRÉS / HÉRITÉS (risque fort en OT/santé) ─
+# Telnet (port 23) — jamais légitime sur un réseau moderne
+alert tcp any any -> $HOME_NET 23 (msg:"POSSBL ACCES TELNET (protocole non chiffre - interdit)"; flow:to_server; flags:S; threshold:type both, track by_src, count 3, seconds 60; classtype:policy-violation; sid:3400043; priority:2; rev:1;)
+
+# SNMP community "public" par défaut (port 161) — reconnaissance équipements
+alert udp any any -> $HOME_NET 161 (msg:"POSSBL SNMP community public par defaut (recon equipements)"; content:"public"; threshold:type both, track by_src, count 3, seconds 60; classtype:attempted-recon; sid:3400044; priority:3; rev:1;)
+
+# ── 3. ACCÈS DIRECT AUX BASES DE DONNÉES (exfiltration bancaire/santé) ─
+# MySQL 3306
+alert tcp $EXTERNAL_NET any -> $HOME_NET 3306 (msg:"POSSBL ACCES BASE MySQL depuis exterieur"; flow:to_server; flags:S; threshold:type both, track by_src, count 5, seconds 60; classtype:attempted-recon; sid:3400045; priority:2; rev:1;)
+
+# MSSQL 1433
+alert tcp $EXTERNAL_NET any -> $HOME_NET 1433 (msg:"POSSBL ACCES BASE MSSQL depuis exterieur"; flow:to_server; flags:S; threshold:type both, track by_src, count 5, seconds 60; classtype:attempted-recon; sid:3400046; priority:2; rev:1;)
+
+# MongoDB 27017
+alert tcp $EXTERNAL_NET any -> $HOME_NET 27017 (msg:"POSSBL ACCES BASE MongoDB depuis exterieur"; flow:to_server; flags:S; threshold:type both, track by_src, count 5, seconds 60; classtype:attempted-recon; sid:3400047; priority:2; rev:1;)
+
+# PostgreSQL 5432
+alert tcp $EXTERNAL_NET any -> $HOME_NET 5432 (msg:"POSSBL ACCES BASE PostgreSQL depuis exterieur"; flow:to_server; flags:S; threshold:type both, track by_src, count 5, seconds 60; classtype:attempted-recon; sid:3400048; priority:2; rev:1;)
+
+# ── 4. EXPLOITATION SMB / VERS (type WannaCry en milieu hospitalier) ─
+# Accès SMB répété (445) depuis l'extérieur — propagation latérale/ransomware
+alert tcp $EXTERNAL_NET any -> $HOME_NET 445 (msg:"POSSBL PROPAGATION SMB / exploit (445) depuis exterieur"; flow:to_server; flags:S; threshold:type both, track by_src, count 5, seconds 30; classtype:attempted-admin; sid:3400050; priority:1; rev:1;)
+
+# ── 5. EXFILTRATION / TUNNELING DNS (fuite de données patients/clients) ─
+# Requêtes DNS anormalement longues (encodage de données dans le sous-domaine)
+alert dns any any -> any any (msg:"POSSBL EXFILTRATION DNS (requete anormalement longue)"; dns.query; content:!"."; pcre:"/^[a-zA-Z0-9\-]{50,}/"; threshold:type both, track by_src, count 5, seconds 60; classtype:policy-violation; sid:3400051; priority:2; rev:1;)
+
+# ── 6. RECONNAISSANCE ICMP (balayage d'hôtes / host discovery) ────
+alert icmp any any -> $HOME_NET any (msg:"POSSBL PING SWEEP (balayage ICMP d'hotes)"; itype:8; threshold:type both, track by_src, count 15, seconds 30; classtype:attempted-recon; sid:3400052; priority:3; rev:1;)
+
+# Gros paquet ICMP — possible tunneling / exfiltration via ICMP
+alert icmp any any -> any any (msg:"POSSBL TUNNEL ICMP (paquet ICMP volumineux)"; itype:8; dsize:>800; threshold:type both, track by_src, count 3, seconds 60; classtype:policy-violation; sid:3400053; priority:2; rev:1;)
+
+# ── 7. ATTAQUES WEB (e-banking, portails patients) ────────────────
+# Injection SQL basique dans une requête HTTP
+alert http any any -> $HOME_NET any (msg:"POSSBL INJECTION SQL (union select) sur service web"; flow:to_server,established; http.uri; content:"union"; nocase; content:"select"; nocase; distance:0; threshold:type both, track by_src, count 3, seconds 60; classtype:web-application-attack; sid:3400060; priority:1; rev:1;)
+
+# Traversée de répertoire (../)
+alert http any any -> $HOME_NET any (msg:"POSSBL TRAVERSEE DE REPERTOIRE (path traversal)"; flow:to_server,established; http.uri; content:"../"; threshold:type both, track by_src, count 3, seconds 60; classtype:web-application-attack; sid:3400061; priority:1; rev:1;)

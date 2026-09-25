@@ -41,6 +41,30 @@ Dépose n'importe quel fichier `*.rules` dans [`rules/`](rules/) et relance le s
 
 Chaque règle utilise `threshold` (track by_src/by_dst) pour ne déclencher qu'au-delà d'un seuil de tentatives sur une fenêtre de temps — évite le bruit d'un simple `curl` ou d'une connexion isolée.
 
+### Règles infrastructures critiques — [`rules/soc-infra-critique.rules`](rules/soc-infra-critique.rules)
+
+Menaces courantes sur les SI santé 🏥 / banque 🏦 / énergie ⚡ (SID `3400040`–`3400061`) :
+
+| Catégorie | SID | Détection |
+|---|---|---|
+| Brute force accès distants | 3400040-3400042 | RDP (3389), FTP (21), SMTP (25/587) |
+| Protocoles non chiffrés / hérités | 3400043, 3400044 | Telnet (23), SNMP community `public` |
+| Accès direct aux bases de données | 3400045-3400048 | MySQL, MSSQL, MongoDB, PostgreSQL depuis l'extérieur |
+| Propagation SMB / ransomware | 3400050 | accès SMB (445) répété (type WannaCry) |
+| Exfiltration DNS | 3400051 | requêtes DNS anormalement longues |
+| Reconnaissance ICMP | 3400052, 3400053 | ping sweep, tunnel ICMP (gros paquets) |
+| Attaques web (e-banking, portail patient) | 3400060, 3400061 | injection SQL, path traversal |
+
+> Ces règles s'appuient sur `$HOME_NET` et `$EXTERNAL_NET` (définis par l'installeur) — pense à adapter les seuils à ton trafic réel de lab.
+
+### Règles ICS/SCADA — [`rules/soc-ics.rules`](rules/soc-ics.rules)
+
+Détection des attaques Modbus/SCADA sur les automates (SID `3500001`+) — voir le [lab OT](../../ot-lab/README.md).
+
+### Ajouter tes propres règles
+
+Dépose n'importe quel fichier `*.rules` dans [`rules/`](rules/) et relance l'installeur : il est repris automatiquement. Garde des SID dans une plage libre (ex. `3400070`+) pour éviter les collisions.
+
 ## Vérifier les alertes en temps réel
 
 ```bash
