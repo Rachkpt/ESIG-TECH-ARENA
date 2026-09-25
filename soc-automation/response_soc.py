@@ -11,6 +11,7 @@ Traite les Cases en attente :
 """
 
 import time
+import base64
 import logging
 from datetime import datetime
 
@@ -25,6 +26,23 @@ from soc_clients import (
 )
 
 log = logging.getLogger("script2")
+
+
+def _virustotal_link(data_type: str, value: str) -> str:
+    """Construit l'URL de la page VirusTotal pour l'observable analysé."""
+    if not value:
+        return "https://www.virustotal.com/gui/home/search"
+    if data_type == "hash":
+        return f"https://www.virustotal.com/gui/file/{value}"
+    if data_type == "ip":
+        return f"https://www.virustotal.com/gui/ip-address/{value}"
+    if data_type in ("domain", "fqdn"):
+        return f"https://www.virustotal.com/gui/domain/{value}"
+    if data_type == "url":
+        # VT identifie une URL par son id = base64url(url) sans padding
+        uid = base64.urlsafe_b64encode(value.encode()).decode().strip("=")
+        return f"https://www.virustotal.com/gui/url/{uid}"
+    return f"https://www.virustotal.com/gui/search/{value}"
 
 
 # ╔══════════════════════════════════════════════════════════╗
@@ -86,16 +104,12 @@ def process_case(case: dict):
 
     log.info(f"Case #{case_num}: {success_count}/{len(results)} analyzers réussis")
 
-    # Résumé des résultats pour Telegram — chaque analyzer est un LIEN
-    # cliquable vers son rapport Cortex (r.analyzer_id contient le job_id).
+    # Résumé des résultats pour Telegram
     results_summary = []
     for r in results:
         status_emoji = "✅" if r.status == "Success" else ("❌" if r.status == "Failure" else "⏰")
         mal_emoji = "🚨" if r.is_malicious else "✓"
-        job_url = f"{Config.CORTEX_URL}/index.html#!/jobs/{r.analyzer_id}"
-        results_summary.append(
-            f'{status_emoji} {mal_emoji} <a href="{job_url}"><b>{r.analyzer_name}</b></a>: {r.score}/100'
-        )
+        results_summary.append(f"{status_emoji} {mal_emoji} <b>{r.analyzer_name}</b>: {r.score}/100")
 
     telegram_send(
         f"⚙️ <b>{len(results)} ANALYZER(S) TERMINÉS</b>\n"
@@ -117,11 +131,8 @@ def process_case(case: dict):
     tg_version = extract_telegram_version(ia_analysis)
 
     # ── 4. Notification finale Telegram ────────────────────
-    # Lien direct vers le rapport détaillé (job réussi) + historique Cortex
-    detail_url = f"{Config.CORTEX_URL}/index.html#!/jobs"
-    first_ok = next((r for r in results if r.status == "Success"), None)
-    if first_ok:
-        detail_url = f"{Config.CORTEX_URL}/index.html#!/jobs/{first_ok.analyzer_id}"
+    # Lien DIRECT vers la page VirusTotal de l'observable analysé
+    detail_url = _virustotal_link(data_type, observable_data)
 
     assignee = case.get("assignee", "")
     assignee_line = f"👤 Assigné à : <b>{assignee}</b>\n" if assignee else ""
@@ -133,7 +144,7 @@ def process_case(case: dict):
         f"{assignee_line}"
         f"📊 Analyzers : {success_count}/{len(results)}\n"
         f"🚨 Malveillants : {malicious_count}\n"
-        f'🔗 <a href="{detail_url}">Voir le rapport détaillé</a>\n'
+        f'🔗 <a href="{detail_url}">Voir sur VirusTotal</a>\n'
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{tg_version}",
         force=True
