@@ -61,9 +61,33 @@ Puis sur le capteur :
 grep 'POSSBL' /var/log/suricata/fast.log
 ```
 
-## Intégration avec Wazuh
+## Intégration avec Wazuh (automatique)
 
-L'agent Wazuh lit `eve.json` via `<localfile>` (type `json`) — voir [Localfile reference](https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/localfile.html) et [Wazuh + Suricata integration guide](https://documentation.wazuh.com/current/proof-of-concept-guide/detect-network-vulnerabilities-suricata.html). Les alertes Suricata remontent ensuite dans `surveillance_soc.py` sous la catégorie "exploitation"/"scan réseau" — voir [classification-alertes.md](../08-automatisation-soc/classification-alertes.md).
+Le script `install-suricata-soc.sh` **branche Wazuh automatiquement** : il ajoute le bloc `<localfile>` (format `json`, pointant `/var/log/suricata/eve.json`) dans `ossec.conf` puis redémarre l'agent — dans la même commande que l'installation de Suricata.
+
+```bash
+# Suricata + intégration Wazuh en une seule fois (par défaut)
+sudo bash install-suricata-soc.sh
+
+# Installer Suricata seul (sans toucher à Wazuh)
+sudo WAZUH_INTEGRATION=false bash install-suricata-soc.sh
+
+# ossec.conf à un emplacement non standard
+sudo OSSEC_CONF=/chemin/vers/ossec.conf bash install-suricata-soc.sh
+```
+
+- **Idempotent** : si `eve.json` est déjà déclaré, rien n'est dupliqué.
+- **Sauvegarde** : `ossec.conf.bak.<timestamp>` créé avant modification.
+- **Redémarrage** : `wazuh-agent` (ou `wazuh-manager`) relancé automatiquement.
+- Bloc ajouté :
+  ```xml
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/log/suricata/eve.json</location>
+  </localfile>
+  ```
+
+Références : [Localfile reference](https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/localfile.html) · [Wazuh + Suricata integration guide](https://documentation.wazuh.com/current/proof-of-concept-guide/detect-network-vulnerabilities-suricata.html). Les alertes remontent ensuite dans `surveillance_soc.py` (catégories "scan réseau", "exploitation", "ICS/SCADA"…) — voir [classification-alertes.md](../08-automatisation-soc/classification-alertes.md).
 
 ## Documentation officielle
 

@@ -120,7 +120,57 @@ if command -v suricata-update >/dev/null 2>&1; then
   suricata-update || true
 fi
 
-# ── 7. Validation + démarrage ──
+# ── 7. Intégration Wazuh : l'agent lit eve.json et remonte les alertes ──
+#  Ajoute un bloc <localfile> (format json) dans ossec.conf pour que
+#  l'agent Wazuh ingère /var/log/suricata/eve.json. Idempotent : ne
+#  duplique rien si le bloc existe déjà. Désactivable : WAZUH_INTEGRATION=false
+WAZUH_INTEGRATION="${WAZUH_INTEGRATION:-true}"
+EVE_JSON="/var/log/suricata/eve.json"
+OSSEC_CONF="${OSSEC_CONF:-/var/ossec/etc/ossec.conf}"
+
+if [ "$WAZUH_INTEGRATION" = "true" ]; then
+  if [ -f "$OSSEC_CONF" ]; then
+    if grep -q "$EVE_JSON" "$OSSEC_CONF"; then
+      echo ">> Wazuh : eve.json déjà déclaré dans $OSSEC_CONF (rien à faire)"
+    else
+      echo ">> Wazuh : ajout de eve.json dans $OSSEC_CONF"
+      cp "$OSSEC_CONF" "$OSSEC_CONF.bak.$(date +%s)"
+      LF_BLOCK="  <localfile>\n    <log_format>json</log_format>\n    <location>$EVE_JSON</location>\n  </localfile>"
+      if grep -q '</ossec_config>' "$OSSEC_CONF"; then
+        # Insère le bloc juste avant la DERNIÈRE balise </ossec_config>
+        awk -v block="$LF_BLOCK" '
+          { lines[NR] = $0; if ($0 ~ /<\/ossec_config>/) last = NR }
+          END {
+            for (i = 1; i <= NR; i++) {
+              if (i == last) print block
+              print lines[i]
+            }
+          }' "$OSSEC_CONF" > "$OSSEC_CONF.tmp" && mv "$OSSEC_CONF.tmp" "$OSSEC_CONF"
+      else
+        # Pas de balise fermante : on ajoute un bloc ossec_config complet
+        printf '<ossec_config>\n%b\n</ossec_config>\n' "$LF_BLOCK" >> "$OSSEC_CONF"
+      fi
+    fi
+
+    # Redémarrer l'agent Wazuh pour prendre en compte le localfile
+    if systemctl list-unit-files 2>/dev/null | grep -q '^wazuh-agent'; then
+      echo ">> Redémarrage wazuh-agent..."
+      systemctl restart wazuh-agent || echo "   ⚠️ échec restart wazuh-agent (vérifier manuellement)"
+    elif systemctl list-unit-files 2>/dev/null | grep -q '^wazuh-manager'; then
+      echo ">> Redémarrage wazuh-manager..."
+      systemctl restart wazuh-manager || echo "   ⚠️ échec restart wazuh-manager (vérifier manuellement)"
+    else
+      echo "   ⚠️ Ni wazuh-agent ni wazuh-manager détecté — relancer le service Wazuh à la main."
+    fi
+  else
+    echo ">> ⚠️ $OSSEC_CONF introuvable : agent Wazuh non installé sur ce capteur ?"
+    echo "   Installe l'agent Wazuh puis relance, ou passe OSSEC_CONF=<chemin>."
+  fi
+else
+  echo ">> Intégration Wazuh désactivée (WAZUH_INTEGRATION=false)"
+fi
+
+# ── 8. Validation + démarrage ──
 echo ">> Test de configuration..."
 suricata -T -c "$Y" -v
 systemctl enable suricata
@@ -131,13 +181,16 @@ systemctl --no-pager --full status suricata | grep -E 'Active:|Loaded:' || true
 cat <<EOF
 
 ══════════════════════════════════════════════════════════════════
- Suricata installé.
+ Suricata installé + intégré à Wazuh.
    Interface   : $IFACE
    Règles SOC  : $(printf '%s, ' "${CUSTOM_RULES[@]##*/}" | sed 's/, $//')
    Journal     : /var/log/suricata/eve.json   (JSON — ingéré par Wazuh)
+   Wazuh       : localfile ajouté dans $OSSEC_CONF (WAZUH_INTEGRATION=$WAZUH_INTEGRATION)
    Alertes     : tail -f /var/log/suricata/fast.log
 
  Test :  depuis une AUTRE machine   nmap -sS -p1-1000 <ip-de-ce-capteur>
-         puis  grep 'POSSBL' /var/log/suricata/fast.log
+         1) local  : grep 'POSSBL' /var/log/suricata/fast.log
+         2) Wazuh  : chercher rule.groups "suricata" dans le dashboard /
+                     l'Indexer (index wazuh-alerts-*)
 ══════════════════════════════════════════════════════════════════
 EOF
