@@ -1,11 +1,23 @@
-# 🛡️ SOC Automatisé — Détection et Réponse aux Incidents de Sécurité
+# 🛡️ ESIG Tech Arena — SOC pour infrastructures critiques
 
-> Projet académique ESIG (Master Cybersécurité) — SOC complet basé sur Wazuh, Suricata, Fail2ban, TheHive 5, Cortex, Grafana/Prometheus, et un script Python d'automatisation (surveillance, réponse, bot Telegram).
+> **Thème : Sécurité des infrastructures critiques** (hôpitaux, banques, énergie/CEET).
+> SOC automatisé et souverain basé sur Wazuh, Suricata, Fail2ban, TheHive 5, Cortex, Grafana/Prometheus et un script Python d'automatisation (surveillance, réponse, bot Telegram).
+> Sa spécificité : une **réponse graduée par criticité** qui détecte les attaques informatiques **et industrielles (SCADA/Modbus)** sans jamais couper un service vital — l'humain reste dans la boucle pour les équipements critiques.
+
+## Ce qui distingue ce SOC (infrastructures critiques)
+
+- 🏥🏦⚡ **Multi-secteurs** : santé, banque, énergie (CEET), chaque alerte étiquetée par secteur.
+- 🎚️ **Réponse graduée** : blocage automatique sur un équipement standard, **validation humaine Telegram** sur un équipement critique (préserver la disponibilité).
+- 🏭 **Surveillance industrielle (OT)** : détection d'attaques Modbus/SCADA + [automate simulé](ot-lab/README.md) pour la démo.
+- 🧠 **Analyse IA** et bot Telegram d'administration à distance.
+
+👉 **Voir la brique dédiée : [10 — Sécurité des infrastructures critiques](docs/10-infrastructures-critiques/README.md).**
 
 ## Structure du dépôt
 
 - [`docs/`](docs/) — documentation complète d'installation et de configuration de chaque brique du SOC.
 - [`soc-automation/`](soc-automation/) — code Python du script d'automatisation (le cœur du projet).
+- [`ot-lab/`](ot-lab/) — lab industriel : automate Modbus simulé (CEET) et scénario d'attaque pour la démonstration.
 
 ## Documentation
 
@@ -21,6 +33,7 @@
 | [07](docs/07-monitoring/README.md) | Monitoring (Grafana / Prometheus) |
 | [08](docs/08-automatisation-soc/README.md) | Script Python d'automatisation SOC |
 | [09](docs/09-depannage-general.md) | Dépannage général |
+| [10](docs/10-infrastructures-critiques/README.md) | **Sécurité des infrastructures critiques** — réponse graduée, validation humaine, OT/SCADA |
 
 ## Stack technique
 

@@ -31,8 +31,8 @@ fi
 
 # Installer les dépendances
 echo "📦 Installation des dépendances Python..."
-pip3 install requests python-dotenv --break-system-packages 2>/dev/null || \
-pip3 install requests python-dotenv
+pip3 install requests python-dotenv pyyaml --break-system-packages 2>/dev/null || \
+pip3 install requests python-dotenv pyyaml
 
 # Créer le fichier .env s'il n'existe pas
 if [ ! -f "$INSTALL_DIR/.env" ]; then
