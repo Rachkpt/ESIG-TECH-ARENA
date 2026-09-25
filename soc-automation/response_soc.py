@@ -86,12 +86,16 @@ def process_case(case: dict):
 
     log.info(f"Case #{case_num}: {success_count}/{len(results)} analyzers réussis")
 
-    # Résumé des résultats pour Telegram
+    # Résumé des résultats pour Telegram — chaque analyzer est un LIEN
+    # cliquable vers son rapport Cortex (r.analyzer_id contient le job_id).
     results_summary = []
     for r in results:
         status_emoji = "✅" if r.status == "Success" else ("❌" if r.status == "Failure" else "⏰")
         mal_emoji = "🚨" if r.is_malicious else "✓"
-        results_summary.append(f"{status_emoji} {mal_emoji} <b>{r.analyzer_name}</b>: {r.score}/100")
+        job_url = f"{Config.CORTEX_URL}/index.html#!/jobs/{r.analyzer_id}"
+        results_summary.append(
+            f'{status_emoji} {mal_emoji} <a href="{job_url}"><b>{r.analyzer_name}</b></a>: {r.score}/100'
+        )
 
     telegram_send(
         f"⚙️ <b>{len(results)} ANALYZER(S) TERMINÉS</b>\n"
@@ -113,6 +117,12 @@ def process_case(case: dict):
     tg_version = extract_telegram_version(ia_analysis)
 
     # ── 4. Notification finale Telegram ────────────────────
+    # Lien direct vers le rapport détaillé (job réussi) + historique Cortex
+    detail_url = f"{Config.CORTEX_URL}/index.html#!/jobs"
+    first_ok = next((r for r in results if r.status == "Success"), None)
+    if first_ok:
+        detail_url = f"{Config.CORTEX_URL}/index.html#!/jobs/{first_ok.analyzer_id}"
+
     telegram_send(
         f"🧠 <b>ANALYSE IA TERMINÉE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -120,6 +130,7 @@ def process_case(case: dict):
         f"📁 Case : <b>#{case_num}</b>\n"
         f"📊 Analyzers : {success_count}/{len(results)}\n"
         f"🚨 Malveillants : {malicious_count}\n"
+        f'🔗 <a href="{detail_url}">Voir le rapport détaillé</a>\n'
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{tg_version}",
         force=True
