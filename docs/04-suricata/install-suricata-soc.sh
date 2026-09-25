@@ -88,6 +88,12 @@ else
   sed -i "/^\([[:space:]]*\)HOME_NET:.*/a\\    SCADA_HMI: \"$SCADA_HMI\"" "$Y"
 fi
 
+# EXTERNAL_NET: "any" (recommandé par le guide Wazuh — voit tout le trafic entrant)
+sed -i 's|^\([[:space:]]*\)EXTERNAL_NET:.*|\1EXTERNAL_NET: "any"|' "$Y"
+
+# Statistiques Suricata activées (stats.enabled: yes) — 1ère occurrence sous "stats:"
+sed -i '0,/^\([[:space:]]*\)stats:/{s//\1stats:/}; /^[[:space:]]*stats:/{n; s|^\([[:space:]]*\)enabled:.*|\1enabled: yes|}' "$Y"
+
 # charge chaque règle custom en plus de suricata.rules (idempotent au ré-lancement)
 for f in "${CUSTOM_RULES[@]}"; do
   name="$(basename "$f")"
