@@ -1,0 +1,33 @@
+# ══════════════════════════════════════════════════════════════════
+#  Dockerfile.cortex — Cortex + dépendances des analyzers (permanent)
+# ══════════════════════════════════════════════════════════════════
+#
+#  L'image officielle thehiveproject/cortex n'embarque PAS Python ni les
+#  dépendances des analyzers (python-magic/libmagic, cortexutils, vt-py…).
+#  Résultat : les analyzers échouent (ModuleNotFoundError: magic) et il
+#  faut réinstaller à la main À CHAQUE recréation du conteneur.
+#
+#  Ce Dockerfile règle ça une fois pour toutes : les dépendances sont
+#  intégrées à l'image, donc elles survivent à `docker compose down/up`.
+#
+#  Utilisation : voir docker-compose (service cortex → build ce fichier).
+# ══════════════════════════════════════════════════════════════════
+
+FROM thehiveproject/cortex:latest
+
+USER root
+
+# 1. Python + la bibliothèque système libmagic (requise par python-magic)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip libmagic1 \
+ && rm -rf /var/lib/apt/lists/*
+
+# 2. Dépendances Python communes aux analyzers
+RUN pip3 install --no-cache-dir --break-system-packages \
+      cortexutils requests vt-py python-magic
+
+# 3. Dépendances propres à CHAQUE analyzer présent dans l'image
+#    (best-effort : on n'échoue pas le build si un requirements pose souci)
+RUN for r in $(find /opt/Cortex-Analyzers/analyzers -name requirements.txt 2>/dev/null); do \
+      pip3 install --no-cache-dir --break-system-packages -r "$r" || true; \
+    done

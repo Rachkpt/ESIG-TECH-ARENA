@@ -81,7 +81,12 @@ services:
       - SOC_NET
 
   cortex.local:
-    image: thehiveproject/cortex:latest
+    # Image Cortex + dépendances des analyzers intégrées (python-magic,
+    # libmagic, cortexutils, vt-py…) → survit à docker compose down/up.
+    build:
+      context: .
+      dockerfile: Dockerfile.cortex
+    image: soc-cortex:local
     restart: unless-stopped
     environment:
       - job_directory=/tmp/cortex-jobs
