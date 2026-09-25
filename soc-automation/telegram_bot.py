@@ -7,6 +7,7 @@ Commandes complètes pour piloter le SOC depuis mobile.
 
 import sys
 import time
+import hashlib
 import logging
 import requests
 from datetime import datetime, timedelta
@@ -108,6 +109,7 @@ def main_menu():
         "<code>/url URL</code> — Scanner une URL\n"
         "<code>/domain DOMAINE</code> — Scanner un domaine\n"
         "<code>/hash HASH</code> — Scanner un hash\n"
+        "📎 <i>Envoie un fichier au bot pour le tester (virus ?)</i>\n"
         "<code>/createcase IP</code> — Case manuel\n"
         "<code>/stats</code> — Statistiques\n"
         "<code>/report</code> — Rapport IA\n"
@@ -452,6 +454,60 @@ def cmd_hash(h: str):
         telegram_send("❌ Hash invalide (MD5/SHA1/SHA256 attendu).\nEx : /hash 131f95c5...")
         return
     _submit_observable(h, "hash", "Hash")
+
+
+def handle_document(message: dict):
+    """
+    L'admin envoie un FICHIER au bot → on calcule son SHA256 et on lance
+    l'analyse Cortex (analyzers hash : VirusTotal, Virusshare…) + IA, le
+    tout renvoyé sur Telegram. Simple : juste glisser un fichier, aucune
+    commande ni bouton à connaître.
+    """
+    chat_id = message["chat"]["id"]
+    if not is_admin(chat_id):
+        return
+
+    doc = message.get("document") or {}
+    file_id = doc.get("file_id")
+    file_name = doc.get("file_name", "fichier")
+    file_size = doc.get("file_size", 0)
+
+    if not file_id:
+        return
+    # Telegram Bot API : téléchargement limité à ~20 Mo
+    if file_size and file_size > 20 * 1024 * 1024:
+        telegram_send(f"❌ Fichier trop volumineux ({file_size//(1024*1024)} Mo). Limite : 20 Mo.")
+        return
+
+    telegram_send(f"📎 Fichier reçu : <b>{file_name}</b>\n⏳ Calcul de l'empreinte SHA256...")
+
+    try:
+        # 1. Obtenir le chemin du fichier côté Telegram
+        r = requests.get(f"{API}/getFile", params={"file_id": file_id}, timeout=15)
+        file_path = r.json().get("result", {}).get("file_path")
+        if not file_path:
+            telegram_send("⚠️ Impossible de récupérer le fichier depuis Telegram.")
+            return
+
+        # 2. Télécharger le contenu et calculer le SHA256
+        dl = requests.get(
+            f"https://api.telegram.org/file/bot{Config.TELEGRAM_TOKEN}/{file_path}",
+            timeout=60
+        )
+        sha256 = hashlib.sha256(dl.content).hexdigest()
+    except Exception as e:
+        log.error(f"handle_document: {e}")
+        telegram_send("⚠️ Erreur lors du téléchargement / hachage du fichier.")
+        return
+
+    telegram_send(
+        f"🔑 <b>SHA256</b> : <code>{sha256}</code>\n"
+        f"📎 {file_name} ({file_size} octets)\n"
+        f"🔬 Lancement de l'analyse antivirus (Cortex)..."
+    )
+
+    # 3. Réutilise tout le pipeline hash existant (Cortex + IA + Telegram)
+    _submit_observable(sha256, "hash", f"Fichier {file_name}")
 
 
 def cmd_createcase(ip: str):
@@ -860,6 +916,8 @@ def main():
                 
                 if "message" in update and "text" in update["message"]:
                     handle_command(update["message"]["text"], update["message"]["chat"]["id"])
+                elif "message" in update and "document" in update["message"]:
+                    handle_document(update["message"])
                 elif "callback_query" in update:
                     cq = update["callback_query"]
                     handle_callback(cq["data"], cq["message"]["chat"]["id"], cq["id"])
