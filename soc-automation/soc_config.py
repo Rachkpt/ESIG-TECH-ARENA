@@ -62,6 +62,13 @@ class Config:
     THEHIVE_TLP: int  = int(os.getenv("THEHIVE_TLP", "2"))
     THEHIVE_PAP: int  = int(os.getenv("THEHIVE_PAP", "2"))
     THEHIVE_ORG: str  = os.getenv("THEHIVE_ORG", "")
+    # Attribution automatique des cases à des analystes (logins TheHive).
+    # Liste séparée par des virgules → chaque case est assigné à tour de rôle
+    # (round-robin). Vide = pas d'attribution automatique.
+    # Ex : THEHIVE_ANALYSTS=joie@netforce4,rachad@netforce4
+    THEHIVE_ANALYSTS: list = [
+        a.strip() for a in os.getenv("THEHIVE_ANALYSTS", "").split(",") if a.strip()
+    ]
 
     # ── CORTEX ────────────────────────────────────────────
     CORTEX_URL: str      = os.getenv("CORTEX_URL", "http://127.0.0.1:9001")

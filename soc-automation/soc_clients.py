@@ -383,6 +383,17 @@ class TheHiveClient:
         self.api_key = Config.THEHIVE_API
         self.tlp = Config.THEHIVE_TLP
         self.pap = Config.THEHIVE_PAP
+        self._assignee_idx = 0   # curseur round-robin d'attribution
+
+    def _next_assignee(self) -> Optional[str]:
+        """Retourne le prochain analyste à qui attribuer un case
+        (round-robin sur Config.THEHIVE_ANALYSTS). None si liste vide."""
+        analysts = Config.THEHIVE_ANALYSTS
+        if not analysts:
+            return None
+        assignee = analysts[self._assignee_idx % len(analysts)]
+        self._assignee_idx += 1
+        return assignee
 
     def _headers(self) -> dict:
         headers = {
@@ -445,19 +456,26 @@ class TheHiveClient:
             log.error(f"TheHive alert create: {e}")
         return None
 
-    def promote_alert_to_case(self, alert_id: str) -> Optional[dict]:
-        """Promeut une Alert en Case (workflow standard TheHive)."""
+    def promote_alert_to_case(self, alert_id: str, assignee: str = None) -> Optional[dict]:
+        """Promeut une Alert en Case (workflow standard TheHive), avec
+        attribution optionnelle à un analyste (assignee = login TheHive)."""
+        body = {}
+        if assignee:
+            body["assignee"] = assignee
         try:
             r = requests.post(
                 f"{self.url}/api/v1/alert/{alert_id}/case",
                 headers=self._headers(),
-                json={},
+                json=body,
                 timeout=15,
                 verify=False
             )
             if r.status_code in [200, 201]:
                 case = r.json()
-                log.info(f"Alert {alert_id} promue en Case #{case.get('number')}")
+                if assignee:
+                    case.setdefault("assignee", assignee)
+                log.info(f"Alert {alert_id} promue en Case #{case.get('number')}"
+                         f"{' → ' + assignee if assignee else ''}")
                 return case
             log.error(f"TheHive promotion erreur: HTTP {r.status_code} — {r.text[:300]}")
         except Exception as e:
@@ -490,7 +508,9 @@ class TheHiveClient:
             return None
 
         alert_id = alert.get("_id")
-        case = self.promote_alert_to_case(alert_id)
+        # Attribution automatique à un analyste (round-robin sur la liste .env)
+        assignee = self._next_assignee()
+        case = self.promote_alert_to_case(alert_id, assignee=assignee)
         if not case:
             log.warning(f"Alert {alert_id} créée mais promotion en Case échouée")
             return None

@@ -548,6 +548,7 @@ def process_public_ip(alert: WazuhAlert):
 
     case_id = case.get("_id", "")
     case_num = case.get("number", "?")
+    assignee = case.get("assignee", "")
 
     # Déterminer le vrai data_type (IP valide ou FQDN)
     case_data_type = "ip" if is_valid_ip(ip) else "fqdn"
@@ -563,6 +564,7 @@ def process_public_ip(alert: WazuhAlert):
         "description": alert.rule_description,
         "severity": alert.severity.value,
         "data_type": case_data_type,
+        "assignee": assignee,
         "extra_data": {
             "agent": alert.agent_name,
             "rule_level": alert.rule_level,
@@ -576,6 +578,7 @@ def process_public_ip(alert: WazuhAlert):
     su.save_state(state)
 
     # Notification Telegram
+    assignee_line = f"  👤 Assigné à : <b>{assignee}</b>\n" if assignee else ""
     telegram_send(
         f"📊 <b>[{alert.severity.label()}] {category_name}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -586,6 +589,7 @@ def process_public_ip(alert: WazuhAlert):
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"✅ <b>Décision :</b>\n"
         f"  ✔ Case créé dans TheHive\n"
+        f"{assignee_line}"
         f"  ✔ Observable ajouté\n"
         f"  ⏳ Analyse Cortex en attente (Script 2)\n",
         force=True

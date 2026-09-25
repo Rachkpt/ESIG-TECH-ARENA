@@ -123,11 +123,14 @@ def process_case(case: dict):
     if first_ok:
         detail_url = f"{Config.CORTEX_URL}/index.html#!/jobs/{first_ok.analyzer_id}"
 
+    assignee = case.get("assignee", "")
+    assignee_line = f"👤 Assigné à : <b>{assignee}</b>\n" if assignee else ""
     telegram_send(
         f"🧠 <b>ANALYSE IA TERMINÉE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{type_label} : <code>{observable_label}</code>\n"
         f"📁 Case : <b>#{case_num}</b>\n"
+        f"{assignee_line}"
         f"📊 Analyzers : {success_count}/{len(results)}\n"
         f"🚨 Malveillants : {malicious_count}\n"
         f'🔗 <a href="{detail_url}">Voir le rapport détaillé</a>\n'

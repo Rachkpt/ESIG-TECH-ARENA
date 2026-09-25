@@ -381,6 +381,7 @@ def cmd_analyze(ip: str):
         telegram_send(f"⚠️ Échec création du Case TheHive pour <code>{ip}</code> — analyse annulée.")
         return
 
+    assignee = case.get("assignee", "")
     state = load_state()
     state["cases"].append({
         "case_id": case.get("_id", ""),
@@ -390,11 +391,14 @@ def cmd_analyze(ip: str):
         "description": "Analyse demandée via Telegram",
         "severity": 2,
         "data_type": "ip",
+        "assignee": assignee,
         "extra_data": {"category": "manual"},
         "created_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         "analyzed": False
     })
     save_state(state)
+    if assignee:
+        telegram_send(f"👤 Case #{case.get('number','?')} assigné à <b>{assignee}</b>")
     add_log("ANALYSE_MANUELLE", f"Analyse demandée pour {ip} — Case #{case.get('number','?')}", ip)
 
 
@@ -418,6 +422,7 @@ def _submit_observable(value: str, data_type: str, label: str):
         telegram_send(f"⚠️ Échec création du Case TheHive pour <code>{value[:80]}</code>.")
         return
 
+    assignee = case.get("assignee", "")
     state = load_state()
     state["cases"].append({
         "case_id": case.get("_id", ""),
@@ -427,11 +432,14 @@ def _submit_observable(value: str, data_type: str, label: str):
         "description": f"Analyse {label} demandée via Telegram",
         "severity": 2,
         "data_type": data_type,      # ← type explicite : url / domain / hash / ip
+        "assignee": assignee,
         "extra_data": {"category": "manual"},
         "created_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         "analyzed": False
     })
     save_state(state)
+    if assignee:
+        telegram_send(f"👤 Case #{case.get('number','?')} assigné à <b>{assignee}</b>")
     add_log("ANALYSE_MANUELLE", f"Analyse {label} demandée pour {value[:60]} — Case #{case.get('number','?')}", "")
 
 
