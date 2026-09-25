@@ -55,4 +55,4 @@ curl -s -o /dev/null -w "%{http_code}\n" http://IP_CORTEX:9001
 
 ---
 
-> Page à compléter au fil des problèmes rencontrés pendant la préparation de la soutenance.
+> Page à compléter au fil des problèmes rencontrés en exploitation.

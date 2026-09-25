@@ -301,4 +301,4 @@ TheHive 5
 
 ## Auteur
 
-**12ak_H4ck** — Projet académique ESIG · Blue Team / SOC
+**12ak_H4ck** — ESIG Tech Arena · Blue Team / SOC
