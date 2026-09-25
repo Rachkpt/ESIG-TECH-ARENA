@@ -77,3 +77,54 @@ def test_stats_par_secteur():
     stats = u.get_sector_stats()
     assert stats["sante"]["alerts"] == 2
     assert stats["sante"]["blocked"] == 1
+
+
+def test_compteur_recidive():
+    _reset_state()
+    assert u.record_offense("9.9.9.9", window=3600) == 1
+    assert u.record_offense("9.9.9.9", window=3600) == 2
+    assert u.record_offense("9.9.9.9", window=3600) == 3
+    u.reset_offense("9.9.9.9")
+    assert u.record_offense("9.9.9.9", window=3600) == 1  # repart à zéro
+
+
+def test_recidive_silencieuse_puis_autoblock(monkeypatch):
+    """1 seule décision créée, puis auto-block au 3e coup (seuil=3)."""
+    _reset_state()
+    assets.load_assets(force=True)
+    from soc_config import Config
+    monkeypatch.setattr(Config, "REPEAT_THRESHOLD", 3)
+
+    def atk(n):
+        a = _alert(id=f"r{n}", rule_description="SCADA MODBUS unauthorized write",
+                   rule_level=12, rule_groups=["ics"],
+                   src_ip="203.0.113.7", dst_ip="192.168.10.50",
+                   agent_name="ceet-plc-lome-nord")
+        s.process_network_alert(a)
+
+    atk(1)
+    assert len(u.get_pending_decisions()) == 1     # 1ère → 1 décision
+    atk(2)
+    assert len(u.get_pending_decisions()) == 1     # 2ème → silencieux, toujours 1
+    atk(3)
+    # 3ème → seuil atteint : décision résolue (auto), compteur remis à zéro
+    assert len(u.get_pending_decisions()) == 0
+    assert "203.0.113.7" not in u.load_state().get("offense_counter", {})
+
+
+def test_source_critique_jamais_autobloquee(monkeypatch):
+    """Si la SOURCE est un équipement critique connu, jamais d'auto-block."""
+    _reset_state()
+    assets.load_assets(force=True)
+    from soc_config import Config
+    monkeypatch.setattr(Config, "REPEAT_THRESHOLD", 2)
+
+    # Source = HMI SCADA (critique) → faux positif possible, on protège
+    for n in range(4):
+        a = _alert(id=f"p{n}", rule_description="SCADA MODBUS unauthorized write",
+                   rule_level=12, rule_groups=["ics"],
+                   src_ip="192.168.10.10", dst_ip="192.168.10.50",
+                   agent_name="ceet-plc-lome-nord")
+        s.process_network_alert(a)
+    # Jamais bloquée automatiquement malgré la récidive
+    assert "192.168.10.10" not in u.load_state()["blocked_ips"]

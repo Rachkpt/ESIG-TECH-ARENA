@@ -29,7 +29,8 @@ from soc_utils import (
     block_ip, add_log, telegram_send, inline_keyboard,
     get_remaining_time, fail2ban_block, load_state, save_state,
     should_alert, clear_throttle, record_native_block, check_expired_blocks,
-    add_pending_decision, bump_sector_stat
+    add_pending_decision, bump_sector_stat, record_offense, reset_offense,
+    get_pending_decisions, resolve_pending_decision
 )
 from soc_clients import wazuh, thehive, mail
 import soc_assets as assets
@@ -264,30 +265,61 @@ def _assess_targets(alert: WazuhAlert):
 
 def request_human_validation(alert: WazuhAlert, asset, secteur: str, crit: Criticality):
     """
-    Équipement critique : on NE bloque pas automatiquement. On enregistre
-    une décision en attente et on notifie l'admin avec deux boutons
-    (Bloquer l'attaquant / Ignorer). La décision est traitée par
-    telegram_bot.py (callbacks approve_/reject_).
+    Équipement critique : on NE bloque pas automatiquement, on demande une
+    validation humaine — MAIS sans saturer Telegram :
+
+      • 1ère attaque de l'IP  → 1 message avec boutons ✅/❌ (« tentative n°1 »)
+      • attaques suivantes     → silencieuses (le compteur monte en fond)
+      • seuil de récidive atteint (REPEAT_THRESHOLD) → blocage AUTOMATIQUE
+        + 1 message final, SAUF si la source est elle-même un équipement
+        critique/sensible connu (là on ne bloque jamais tout seul).
     """
     ip = alert.src_ip
     category_name = DETECTION_RULES.get(alert.category, {}).get("description", alert.category.value)
+
+    # Compteur de récidive (fenêtre glissante REPEAT_WINDOW)
+    count = record_offense(ip, Config.REPEAT_WINDOW)
+
+    # Garde-fou : la SOURCE est-elle un équipement protégé (faux positif
+    # possible = service vital) ? Si oui, jamais de blocage automatique.
+    src_asset = assets.lookup(dst_ip=ip)
+    src_protected = src_asset.criticite in (Criticality.CRITIQUE, Criticality.SENSIBLE)
+
+    # ── RÉCIDIVE : seuil atteint → blocage automatique ────────
+    if count >= Config.REPEAT_THRESHOLD and not src_protected:
+        _auto_block_recidive(alert, asset, secteur, crit, count, category_name)
+        return
+
+    # ── 1ère attaque → on demande la validation (une seule fois) ──
+    if count == 1:
+        _send_validation_request(alert, asset, secteur, crit, count, category_name)
+        return
+
+    # ── Attaques intermédiaires → SILENCE (compteur en arrière-plan) ──
+    # (source protégée : on relance quand même une fois au seuil, pour
+    #  rappeler qu'une décision humaine reste nécessaire)
+    if src_protected and count == Config.REPEAT_THRESHOLD:
+        _send_validation_request(alert, asset, secteur, crit, count, category_name,
+                                 escalation=True)
+        return
+
+    add_log("RECIDIVE_SILENCE",
+            f"{category_name} depuis {ip} — tentative n°{count} (silencieux)",
+            ip, alert.category.value)
+
+
+def _send_validation_request(alert, asset, secteur, crit, count, category_name,
+                             escalation: bool = False):
+    """Crée la décision en attente et envoie LE message Telegram avec boutons."""
+    ip = alert.src_ip
     ts = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     emoji = sector_emoji(secteur)
     slabel = sector_label(secteur)
     cible = asset.nom or alert.agent_name or alert.dst_ip or "N/A"
 
-    # Anti-spam : une relance par (catégorie, IP) par 30 min max
-    throttle_key = f"pending:{alert.category.value}:{ip}"
-    if not should_alert(throttle_key, window_seconds=1800):
-        return
-
     dec_id = add_pending_decision({
-        "ip": ip,
-        "dst_ip": alert.dst_ip,
-        "agent": alert.agent_name,
-        "asset_nom": asset.nom,
-        "secteur": secteur,
-        "criticite": crit.value,
+        "ip": ip, "dst_ip": alert.dst_ip, "agent": alert.agent_name,
+        "asset_nom": asset.nom, "secteur": secteur, "criticite": crit.value,
         "category": alert.category.value,
         "reason": f"{category_name} — {alert.rule_description}",
         "rule_level": alert.rule_level,
@@ -300,7 +332,15 @@ def request_human_validation(alert: WazuhAlert, asset, secteur: str, crit: Criti
     ])
 
     is_ics = alert.category == AlertCategory.ICS_ATTACK
-    entete = "🏭 <b>[ALERTE ICS/SCADA]</b>" if is_ics else f"🚨 <b>[{crit.label()}]</b>"
+    if escalation:
+        entete = f"🔁 <b>[RÉCIDIVE — {crit.label()}]</b>"
+        note = (f"⚠️ <b>{count}e tentative</b> — source protégée, blocage auto impossible.\n"
+                f"   Décision humaine <b>toujours</b> requise :")
+    else:
+        entete = "🏭 <b>[ALERTE ICS/SCADA]</b>" if is_ics else f"🚨 <b>[{crit.label()}]</b>"
+        note = (f"⛔ <b>Blocage automatique DÉSACTIVÉ</b> sur cet équipement critique\n"
+                f"   (préserver la continuité du service vital).\n"
+                f"👉 <b>Décision requise</b> (tentative n°{count}) :")
 
     telegram_send(
         f"{entete} {emoji} {slabel}\n"
@@ -313,14 +353,52 @@ def request_human_validation(alert: WazuhAlert, asset, secteur: str, crit: Criti
         f"⚠️ Niveau : {alert.rule_level}/15\n"
         f"🕐 {ts}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⛔ <b>Blocage automatique DÉSACTIVÉ</b> sur cet équipement critique\n"
-        f"   (préserver la continuité du service vital).\n"
-        f"👉 <b>Décision requise :</b>",
+        f"{note}",
         buttons=buttons,
         force=True
     )
     add_log("VALIDATION_REQUISE",
             f"{category_name} sur {cible} — attente décision admin (#{dec_id})",
+            ip, alert.category.value)
+
+
+def _auto_block_recidive(alert, asset, secteur, crit, count, category_name):
+    """Récidive au-delà du seuil : blocage automatique + 1 notification."""
+    ip = alert.src_ip
+    ts = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    cible = asset.nom or alert.agent_name or alert.dst_ip or "N/A"
+
+    # Résoudre la décision en attente éventuelle (auto-approuvée par récidive)
+    for d in get_pending_decisions():
+        if d.get("ip") == ip and d.get("category") == alert.category.value:
+            resolve_pending_decision(d["id"], "approved", by="auto-récidive")
+            break
+
+    blocked = block_ip(ip, f"Récidive x{count} — {category_name}",
+                       source="auto-recidive", category=alert.category.value)
+    if blocked:
+        bump_sector_stat(secteur, "blocked")
+    reset_offense(ip)  # le compteur repart à zéro une fois bloqué
+
+    msg = (
+        f"⛔ <b>BLOCAGE AUTOMATIQUE (RÉCIDIVE)</b> {sector_emoji(secteur)} {sector_label(secteur)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Équipement : <b>{cible}</b> ({crit.emoji()} {crit.label()})\n"
+        f"🌐 Attaquant : <code>{ip}</code>\n"
+        f"📌 {category_name}\n"
+        f"🔁 <b>{count} tentatives</b> — seuil de récidive atteint\n"
+        f"🕐 {ts}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    msg += "   ✔ Blocage local effectué\n" if blocked else "   ⚠️ Déjà bloquée / échec local\n"
+    if Config.WAZUH_AR_ON_MANUAL_BLOCK and wazuh.run_active_response(ip):
+        msg += "   ✔ firewall-drop Wazuh déclenché sur les agents actifs\n"
+
+    buttons = inline_keyboard([[("🔓 Débloquer", f"unblock_{ip}"),
+                                ("🚫 Bannir", f"ban_{ip}")]])
+    telegram_send(msg, buttons=buttons, force=True)
+    add_log("BLOCAGE_RECIDIVE",
+            f"{ip} bloqué après {count} tentatives — {category_name}",
             ip, alert.category.value)
 
 

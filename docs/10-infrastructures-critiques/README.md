@@ -77,6 +77,30 @@ Sur un équipement critique, l'admin reçoit sur Telegram :
 Commandes associées : `/attente` (décisions en attente), `/secteurs`
 (tableau de bord par secteur).
 
+### Anti-surcharge : récidive silencieuse
+
+Pour ne pas noyer l'admin sous les notifications quand un attaquant
+insiste, une seule demande de validation est envoyée par IP :
+
+| Attaque de l'IP X | Telegram |
+|---|---|
+| 1ère fois | 📩 1 message avec ✅ / ❌ (« tentative n°1 ») |
+| 2ème, 3ème… | 🔕 silencieux (le compteur monte en arrière-plan) |
+| Seuil atteint (`REPEAT_THRESHOLD`, défaut 3) | 📩 1 message « récidive → **blocage automatique** » |
+
+Le blocage automatique de récidive ne s'applique **jamais** si la
+*source* est elle-même un équipement critique/sensible connu (un faux
+positif couperait un service vital) — là, on continue de demander à
+l'humain. Seuils réglables : `REPEAT_THRESHOLD` / `REPEAT_WINDOW`.
+
+### Déblocage
+
+`/unblock <ip>` (ou le bouton 🔓) lève le blocage local et remet le
+compteur de récidive à zéro. Le blocage natif Wazuh sur l'agent expire
+seul via son `<timeout>` ; pour un déblocage **immédiat** des agents,
+configurer `WAZUH_AR_UNBLOCK_COMMAND` (voir
+[active-response.md](../03-wazuh/active-response.md)).
+
 > ⚠️ **Important pour la CEET** : sur un équipement critique, il faut
 > aussi **désactiver le blocage natif** de Wazuh Active Response (sinon
 > Wazuh bloquerait sans attendre la décision humaine). Le SOC déclenche

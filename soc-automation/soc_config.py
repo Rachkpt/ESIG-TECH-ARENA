@@ -43,6 +43,11 @@ class Config:
     # Doit exister dans ar.conf sur le manager — vérifier avant de compter dessus.
     WAZUH_AR_COMMAND: str  = os.getenv("WAZUH_AR_COMMAND", "firewall-drop0")
     WAZUH_AR_ON_MANUAL_BLOCK: bool = os.getenv("WAZUH_AR_ON_MANUAL_BLOCK", "true").lower() == "true"
+    # Commande AR de DÉBLOCAGE (déblocage immédiat de l'agent depuis Telegram).
+    # Vide par défaut : le blocage natif Wazuh expire seul via son timeout.
+    # Pour un déblocage immédiat, configurer une commande dédiée dans ar.conf
+    # (voir docs/03-wazuh/active-response.md) puis renseigner ce nom ici.
+    WAZUH_AR_UNBLOCK_COMMAND: str = os.getenv("WAZUH_AR_UNBLOCK_COMMAND", "")
 
     # ── WAZUH INDEXER (OpenSearch — stocke les vraies alertes) ─
     # Les alertes ne sont PAS dans l'API manager (port 55000) mais
@@ -98,6 +103,15 @@ class Config:
     NFTABLES_CHAIN: str    = os.getenv("NFTABLES_CHAIN", "soc_input")
     BLOCK_DURATION: int    = int(os.getenv("BLOCK_DURATION", "7200"))
     HOME_NET: str          = os.getenv("HOME_NET", "10.0.0.0/8")
+
+    # ── RÉCIDIVE (auto-blocage d'un attaquant insistant) ──────
+    # Sur un équipement critique, on demande une validation humaine.
+    # Mais si la MÊME IP récidive REPEAT_THRESHOLD fois en REPEAT_WINDOW
+    # secondes, on bloque automatiquement (l'attaquant s'acharne).
+    # Garde-fou : ne s'applique jamais si la SOURCE est elle-même un
+    # équipement critique/sensible connu (faux positif = service vital).
+    REPEAT_THRESHOLD: int = int(os.getenv("REPEAT_THRESHOLD", "3"))
+    REPEAT_WINDOW: int    = int(os.getenv("REPEAT_WINDOW", "3600"))
 
     # ── WHITELIST ─────────────────────────────────────────
     _wl_raw: str = os.getenv("WHITELIST_IPS", "127.0.0.1,::1")
@@ -461,6 +475,8 @@ class SOCState:
     # File des décisions en attente de validation humaine (équipements
     # critiques : le SOC ne bloque PAS tout seul, il demande à l'admin).
     pending_decisions: list = field(default_factory=list)
+    # Compteur de récidive par IP : {ip: {"count", "first_ts", "last_ts"}}
+    offense_counter: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -473,7 +489,8 @@ class SOCState:
             "report_requested": self.report_requested,
             "processed_alerts": self.processed_alerts[-10000:],
             "alert_throttle": self.alert_throttle,
-            "pending_decisions": self.pending_decisions[-200:]
+            "pending_decisions": self.pending_decisions[-200:],
+            "offense_counter": self.offense_counter
         }
 
 

@@ -75,6 +75,37 @@ Les blocs `<active-response>` ci-dessus ne se déclenchent que **nativement**, q
 - ⚠️ **Best-effort, à valider en conditions réelles** : le nom de commande AR utilisable via l'API dépend de ce qui est enregistré dans `ar.conf` sur le manager — pas garanti identique sur toutes les versions/installations Wazuh. Si `/block` répond "firewall-drop Wazuh non déclenché", vérifie `ar.conf` et les logs (`journalctl -u soc-telegram` ou le fichier de log configuré).
 - ⚠️ **Pas de réversion automatique côté Wazuh** : `/unblock` lève le blocage local, mais un `firewall-drop` déclenché manuellement via l'API n'est pas automatiquement annulé (contrairement au déclenchement natif par règle, qui respecte le `<timeout>` du bloc `<active-response>`). À vérifier/lever à la main côté agent si besoin.
 
+### Déblocage immédiat des agents depuis Telegram (optionnel)
+
+Par défaut, un blocage natif Wazuh **expire seul** à la fin de son `<timeout>`. Pour pouvoir le **lever immédiatement** depuis Telegram (`/unblock`), il faut déclarer une commande Active Response de **suppression** côté manager, puis renseigner son nom dans `WAZUH_AR_UNBLOCK_COMMAND`.
+
+1. Sur le manager, dans `ossec.conf`, déclarer une commande qui appelle `firewall-drop` en mode suppression :
+
+   ```xml
+   <command>
+     <name>firewall-drop-delete</name>
+     <executable>firewall-drop</executable>
+     <timeout_allowed>no</timeout_allowed>
+   </command>
+   <active-response>
+     <command>firewall-drop-delete</command>
+     <location>all</location>
+     <rules_id>999999</rules_id>  <!-- jamais déclenché par une règle : usage API only -->
+   </active-response>
+   ```
+
+   > Le script `firewall-drop` prend en 1er argument l'action (`add`/`delete`). Selon ta version de Wazuh, adapte pour que cette commande invoque bien la suppression (voir la doc du script `firewall-drop`).
+
+2. Redémarrer le manager, puis dans `soc-automation/.env` :
+
+   ```ini
+   WAZUH_AR_UNBLOCK_COMMAND=firewall-drop-delete0
+   ```
+
+3. Désormais `/unblock <ip>` (ou le bouton 🔓 Débloquer) lève le blocage **local** ET envoie l'ordre de suppression `firewall-drop` sur les agents.
+
+Si `WAZUH_AR_UNBLOCK_COMMAND` reste vide, le comportement ne change pas : le blocage natif expire seul via son `<timeout>`.
+
 ## Documentation officielle
 
 - [Active Response — vue d'ensemble](https://documentation.wazuh.com/current/user-manual/capabilities/active-response/index.html)

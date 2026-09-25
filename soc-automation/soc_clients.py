@@ -91,23 +91,31 @@ class WazuhClient:
             log.error(f"Wazuh agents: {e}")
         return []
 
-    def run_active_response(self, ip: str, command: str = None) -> bool:
+    def run_active_response(self, ip: str, command: str = None,
+                            action: str = "add") -> bool:
         """
-        Déclenche manuellement l'active-response Wazuh (firewall-drop par
-        défaut) sur tous les agents actuellement connectés (status "active"),
-        en plus du blocage local iptables/fail2ban du script.
+        Déclenche l'active-response Wazuh sur tous les agents connectés.
 
-        Utilisé pour le blocage MANUEL (Telegram /block) : le blocage
-        automatique déclenché par une règle Wazuh (voir active-response.md)
-        bloque déjà nativement sur l'agent attaqué — ceci reproduit le même
-        effet quand c'est un humain qui décide de bloquer, pas une règle.
+        action="add"    → blocage (firewall-drop, Config.WAZUH_AR_COMMAND)
+        action="delete" → déblocage : utilise Config.WAZUH_AR_UNBLOCK_COMMAND.
+            ⚠️ Wazuh retire de toute façon le blocage natif à l'expiration
+            du timeout configuré dans ar.conf. Le déblocage IMMÉDIAT depuis
+            Telegram nécessite une commande AR dédiée côté manager (voir
+            docs/03-wazuh/active-response.md). Si elle n'est pas configurée
+            (WAZUH_AR_UNBLOCK_COMMAND vide), on ne fait rien et on renvoie
+            False — le blocage natif expirera seul.
 
-        Best-effort : le nom de commande AR ("firewall-drop0" par défaut,
-        voir Config.WAZUH_AR_COMMAND) dépend de ce qui est enregistré dans
-        ar.conf sur le manager — à vérifier en pratique sur l'instance
-        réelle, pas garanti par la doc seule.
+        Best-effort : les noms de commande AR dépendent de ce qui est
+        enregistré dans ar.conf sur le manager — à vérifier sur l'instance.
         """
-        command = command or Config.WAZUH_AR_COMMAND
+        if action == "delete":
+            command = command or Config.WAZUH_AR_UNBLOCK_COMMAND
+            if not command:
+                log.info("Wazuh AR: déblocage natif non configuré "
+                         "(WAZUH_AR_UNBLOCK_COMMAND vide) — expiration auto seule")
+                return False
+        else:
+            command = command or Config.WAZUH_AR_COMMAND
         agents = self.get_agents()
         active_ids = [
             a.get("id") for a in agents
@@ -125,7 +133,8 @@ class WazuhClient:
                 verify=False, timeout=15
             )
             if r.status_code == 200:
-                log.info(f"Wazuh AR '{command}' déclenché sur {len(active_ids)} agent(s) pour {ip}")
+                log.info(f"Wazuh AR '{command}' ({action}) déclenché sur "
+                         f"{len(active_ids)} agent(s) pour {ip}")
                 return True
             log.error(f"Wazuh AR erreur: HTTP {r.status_code} — {r.text[:300]}")
         except requests.exceptions.ConnectionError:

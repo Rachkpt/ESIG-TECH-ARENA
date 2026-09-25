@@ -20,7 +20,7 @@ from soc_utils import (
     telegram_send, inline_keyboard, reply_keyboard, check_expired_blocks,
     firewall_list_blocked, get_native_blocks,
     get_pending_decisions, get_pending_decision, resolve_pending_decision,
-    bump_sector_stat, get_sector_stats
+    bump_sector_stat, get_sector_stats, reset_offense
 )
 from soc_clients import wazuh, thehive, cortex
 from soc_assets import sector_emoji, sector_label, all_assets, Criticality
@@ -317,12 +317,20 @@ def cmd_unblock(ip: str):
         telegram_send(f"❌ IP invalide: <code>{ip}</code>")
         return
     ok = unblock_ip(ip, source="admin")
+    reset_offense(ip)  # repartir de zéro : l'IP n'est plus une récidiviste
     if not ok:
         telegram_send("⚠️ Non trouvée")
         return
     msg = f"✅ <code>{ip}</code> débloquée (local)"
-    if Config.WAZUH_AR_ON_MANUAL_BLOCK:
-        msg += "\n⚠️ Le firewall-drop Wazuh déclenché manuellement n'est pas annulé automatiquement — vérifie côté agent(s) si besoin."
+    # Déblocage natif Wazuh sur les agents
+    if Config.WAZUH_AR_UNBLOCK_COMMAND:
+        if wazuh.run_active_response(ip, action="delete"):
+            msg += "\n🛡️ + déblocage firewall-drop Wazuh déclenché sur les agents"
+        else:
+            msg += "\n⚠️ Déblocage Wazuh non déclenché (voir logs)"
+    elif Config.WAZUH_AR_ON_MANUAL_BLOCK:
+        msg += ("\nℹ️ Blocage natif Wazuh : expire seul via son timeout "
+                "(configure WAZUH_AR_UNBLOCK_COMMAND pour un déblocage immédiat).")
     telegram_send(msg)
 
 

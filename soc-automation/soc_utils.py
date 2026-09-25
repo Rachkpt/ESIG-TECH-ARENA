@@ -839,6 +839,42 @@ def add_pending_decision(dec: dict) -> str:
     return dec_id
 
 
+def record_offense(ip: str, window: int = None) -> int:
+    """
+    Enregistre une infraction de plus pour `ip` et retourne le nombre
+    d'infractions dans la fenêtre glissante `window` (secondes).
+    Le compteur se réinitialise si la dernière infraction date de plus
+    d'une fenêtre (récidive « fraîche » uniquement).
+    """
+    import time as _t
+    if window is None:
+        window = Config.REPEAT_WINDOW
+    now = _t.time()
+    state = load_state()
+    counter = state.setdefault("offense_counter", {})
+    entry = counter.get(ip)
+    if not entry or (now - entry.get("first_ts", now)) > window:
+        entry = {"count": 1, "first_ts": now, "last_ts": now}
+    else:
+        entry["count"] = entry.get("count", 0) + 1
+        entry["last_ts"] = now
+    counter[ip] = entry
+    # Purge des IP dont la dernière infraction dépasse 2× la fenêtre
+    for old_ip in [k for k, v in counter.items()
+                   if (now - v.get("last_ts", now)) > 2 * window]:
+        counter.pop(old_ip, None)
+    save_state(state)
+    return entry["count"]
+
+
+def reset_offense(ip: str):
+    """Remet à zéro le compteur de récidive d'une IP (ex. après déblocage)."""
+    state = load_state()
+    if ip in state.get("offense_counter", {}):
+        state["offense_counter"].pop(ip, None)
+        save_state(state)
+
+
 def get_pending_decisions() -> list:
     """Retourne les décisions encore en attente (status == pending)."""
     state = load_state()
