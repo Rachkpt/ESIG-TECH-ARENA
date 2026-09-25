@@ -1,0 +1,51 @@
+# ══════════════════════════════════════════════════════════════════
+#  soc-ics.rules — Détection d'attaques ICS/SCADA (Modbus/TCP) — CEET
+# ══════════════════════════════════════════════════════════════════
+#
+#  Protège les automates industriels (PLC) des infrastructures
+#  énergétiques. Modbus (port 502) n'a aucune authentification : toute
+#  écriture (function code 5/6/15/16) est une COMMANDE sur le procédé
+#  physique (ouverture de disjoncteur, changement de consigne...).
+#
+#  Principe : sur un réseau OT bien segmenté, SEUL le poste de
+#  supervision (HMI) doit écrire sur les automates. On alerte donc sur :
+#    - toute ÉCRITURE Modbus venant d'un hôte NON supervision ;
+#    - la reconnaissance Modbus (lectures répétées / scan port 502) ;
+#    - les commandes de diagnostic dangereuses (restart, listen-only).
+#
+#  ⚠️ AJUSTER $SCADA_HMI : mettre l'IP réelle du poste de supervision
+#     autorisé de ton lab (variable définie dans suricata.yaml, ou
+#     remplacer directement ci-dessous). Par défaut on considère qu'AUCUN
+#     hôte n'est de confiance ($SCADA_HMI = un placeholder improbable),
+#     donc toute écriture déclenche — pratique pour la démo.
+#
+#  Les messages contiennent "MODBUS"/"SCADA"/"ICS", repris par
+#  surveillance_soc.py → catégorie ICS_ATTACK → validation humaine.
+# ══════════════════════════════════════════════════════════════════
+
+# ── 1. ÉCRITURE Modbus depuis un hôte NON autorisé ────────────────
+# Write Single Coil (0x05) — typiquement OUVERTURE d'un disjoncteur
+alert tcp !$SCADA_HMI any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS ecriture bobine non autorisee (Write Single Coil - ouverture disjoncteur possible)"; flow:to_server,established; content:"|05|"; offset:7; depth:1; classtype:attempted-admin; priority:1; sid:3500001; rev:1;)
+
+# Write Single Register (0x06) — changement de consigne (tension, seuil)
+alert tcp !$SCADA_HMI any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS ecriture registre non autorisee (Write Single Register)"; flow:to_server,established; content:"|06|"; offset:7; depth:1; classtype:attempted-admin; priority:1; sid:3500002; rev:1;)
+
+# Write Multiple Coils (0x0F)
+alert tcp !$SCADA_HMI any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS ecriture multiple bobines non autorisee (Write Multiple Coils)"; flow:to_server,established; content:"|0f|"; offset:7; depth:1; classtype:attempted-admin; priority:1; sid:3500003; rev:1;)
+
+# Write Multiple Registers (0x10)
+alert tcp !$SCADA_HMI any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS ecriture multiple registres non autorisee (Write Multiple Registers)"; flow:to_server,established; content:"|10|"; offset:7; depth:1; classtype:attempted-admin; priority:1; sid:3500004; rev:1;)
+
+# ── 2. Commandes de diagnostic Modbus DANGEREUSES (0x08) ──────────
+# Sub-function 0x0001 = Restart Communications Option (redémarre l'automate)
+alert tcp any any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS diagnostic dangereux - Restart Communications (redemarrage automate)"; flow:to_server,established; content:"|08|"; offset:7; depth:1; content:"|00 01|"; distance:0; within:2; classtype:attempted-dos; priority:1; sid:3500005; rev:1;)
+
+# Sub-function 0x0004 = Force Listen Only Mode (l'automate n'exécute plus les commandes)
+alert tcp any any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS diagnostic dangereux - Force Listen Only Mode"; flow:to_server,established; content:"|08|"; offset:7; depth:1; content:"|00 04|"; distance:0; within:2; classtype:attempted-dos; priority:1; sid:3500006; rev:1;)
+
+# ── 3. Reconnaissance Modbus ──────────────────────────────────────
+# Scan / balayage du port 502 (repérage des automates sur le réseau)
+alert tcp any any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS reconnaissance - connexions repetees port 502 (scan automates)"; flow:to_server; flags:S; threshold:type both, track by_src, count 5, seconds 60; classtype:attempted-recon; priority:2; sid:3500010; rev:1;)
+
+# Read Device Identification (0x2B/0x0E) — empreinte du fabricant/modèle du PLC
+alert tcp any any -> $HOME_NET 502 (msg:"ICS/SCADA MODBUS reconnaissance - Read Device Identification (fingerprinting PLC)"; flow:to_server,established; content:"|2b 0e|"; offset:7; depth:2; classtype:attempted-recon; priority:2; sid:3500011; rev:1;)

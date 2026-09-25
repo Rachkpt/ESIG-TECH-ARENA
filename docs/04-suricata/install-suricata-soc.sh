@@ -30,8 +30,14 @@ RULES_DIR="$SCRIPT_DIR/rules"
 IFACE="${IFACE:-$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')}"
 [ -n "${IFACE:-}" ] || { echo "Interface introuvable — relance avec IFACE=<iface>"; exit 1; }
 HOMENET="${HOMENET:-[10.0.0.0/8,172.16.0.0/12,192.168.0.0/16]}"
+# Poste de supervision SCADA autorisé (SEUL hôte censé écrire sur les
+# automates Modbus). Utilisé par rules/soc-ics.rules. Par défaut un
+# placeholder improbable → TOUTE écriture Modbus déclenche (idéal démo).
+# En prod : SCADA_HMI='[192.168.10.10]' bash install-suricata-soc.sh
+SCADA_HMI="${SCADA_HMI:-[192.0.2.123]}"
 echo ">> Interface capteur : $IFACE"
 echo ">> HOME_NET          : $HOMENET"
+echo ">> SCADA_HMI (autorisé écriture Modbus) : $SCADA_HMI"
 
 # ── 2. Installation du paquet ──
 . /etc/os-release
@@ -73,6 +79,14 @@ Y=/etc/suricata/suricata.yaml
 sed -i "s|^\([[:space:]]*\)HOME_NET:.*|\1HOME_NET: \"$HOMENET\"|" "$Y"
 sed -i "0,/^\([[:space:]]*\)- interface:.*/s//\1- interface: $IFACE/" "$Y"
 sed -i 's|^\([[:space:]]*\)#\?[[:space:]]*community-id:.*|\1community-id: true|' "$Y"
+
+# Variable SCADA_HMI (poste de supervision autorisé) pour soc-ics.rules :
+# ajoutée sous address-groups si absente, sinon mise à jour (idempotent).
+if grep -qE '^\s*SCADA_HMI:' "$Y"; then
+  sed -i "s|^\([[:space:]]*\)SCADA_HMI:.*|\1SCADA_HMI: \"$SCADA_HMI\"|" "$Y"
+else
+  sed -i "/^\([[:space:]]*\)HOME_NET:.*/a\\    SCADA_HMI: \"$SCADA_HMI\"" "$Y"
+fi
 
 # charge chaque règle custom en plus de suricata.rules (idempotent au ré-lancement)
 for f in "${CUSTOM_RULES[@]}"; do
