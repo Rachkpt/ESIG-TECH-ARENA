@@ -46,6 +46,11 @@ def process_case(case: dict):
     extra = case.get("extra_data", {})
     ts = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
+    # Libellé lisible selon le type d'observable
+    _TYPE_LABELS = {"ip": "🌐 IP", "url": "🔗 URL", "domain": "🌍 Domaine",
+                    "fqdn": "🌍 Domaine", "hash": "🔑 Hash"}
+    type_label = _TYPE_LABELS.get(data_type, f"🔎 {data_type}")
+
     # Déterminer la donnée à analyser
     if data_type == "hash":
         observable_data = extra.get("hash", "")
@@ -68,7 +73,7 @@ def process_case(case: dict):
     telegram_send(
         f"🔬 <b>ANALYSE EN COURS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{'🌐 IP' if data_type == 'ip' else '🔑 Hash'} : <code>{observable_label}</code>\n"
+        f"{type_label} : <code>{observable_label}</code>\n"
         f"📁 Case : <b>#{case_num}</b>\n"
         f"🕐 Début : {ts}\n"
         f"⏳ <i>Lancement des analyzers Cortex...</i>"
@@ -91,7 +96,7 @@ def process_case(case: dict):
     telegram_send(
         f"⚙️ <b>{len(results)} ANALYZER(S) TERMINÉS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{'🌐 IP' if data_type == 'ip' else '🔑 Hash'} : <code>{observable_label}</code>\n"
+        f"{type_label} : <code>{observable_label}</code>\n"
         f"📊 Résultats : {success_count}/{len(results)} réussis\n"
         f"🚨 Malveillants : {malicious_count}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n" +
@@ -111,7 +116,7 @@ def process_case(case: dict):
     telegram_send(
         f"🧠 <b>ANALYSE IA TERMINÉE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{'🌐 IP' if data_type == 'ip' else '🔑 Hash'} : <code>{observable_label}</code>\n"
+        f"{type_label} : <code>{observable_label}</code>\n"
         f"📁 Case : <b>#{case_num}</b>\n"
         f"📊 Analyzers : {success_count}/{len(results)}\n"
         f"🚨 Malveillants : {malicious_count}\n"

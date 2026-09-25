@@ -104,7 +104,10 @@ def main_menu():
         "<code>/ban IP</code> — Bannir permanent\n"
         "<code>/whitelist IP</code> — Whitelister\n"
         "<code>/cases</code> — Cases TheHive\n"
-        "<code>/analyze IP</code> — Lancer Cortex\n"
+        "<code>/analyze IP</code> — Lancer Cortex (IP)\n"
+        "<code>/url URL</code> — Scanner une URL\n"
+        "<code>/domain DOMAINE</code> — Scanner un domaine\n"
+        "<code>/hash HASH</code> — Scanner un hash\n"
         "<code>/createcase IP</code> — Case manuel\n"
         "<code>/stats</code> — Statistiques\n"
         "<code>/report</code> — Rapport IA\n"
@@ -391,6 +394,64 @@ def cmd_analyze(ip: str):
     })
     save_state(state)
     add_log("ANALYSE_MANUELLE", f"Analyse demandée pour {ip} — Case #{case.get('number','?')}", ip)
+
+
+def _submit_observable(value: str, data_type: str, label: str):
+    """
+    Soumet un observable (url/domain/hash/ip) à l'analyse Cortex via un
+    Case TheHive. Script 2 lance les analyzers du bon type, synthétise
+    avec l'IA et renvoie TOUT sur Telegram.
+    """
+    value = value.strip()
+    if not value:
+        telegram_send(f"❌ Valeur vide. Usage : /{data_type} <{data_type}>")
+        return
+    telegram_send(f"🔍 Analyse Cortex ({label}) lancée pour <code>{value[:80]}</code>...")
+
+    case = thehive.create_observable_case(
+        value, data_type, f"Analyse manuelle {label}",
+        f"Analyse {label} demandée via Telegram", Severity.MEDIUM, "Telegram"
+    )
+    if not case:
+        telegram_send(f"⚠️ Échec création du Case TheHive pour <code>{value[:80]}</code>.")
+        return
+
+    state = load_state()
+    state["cases"].append({
+        "case_id": case.get("_id", ""),
+        "number": case.get("number", "?"),
+        "ip": value,                 # le Script 2 lit ce champ comme observable
+        "title": f"Analyse {label} — {value[:40]}",
+        "description": f"Analyse {label} demandée via Telegram",
+        "severity": 2,
+        "data_type": data_type,      # ← type explicite : url / domain / hash / ip
+        "extra_data": {"category": "manual"},
+        "created_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        "analyzed": False
+    })
+    save_state(state)
+    add_log("ANALYSE_MANUELLE", f"Analyse {label} demandée pour {value[:60]} — Case #{case.get('number','?')}", "")
+
+
+def cmd_url(url: str):
+    if not (url.startswith("http://") or url.startswith("https://")):
+        telegram_send("❌ URL invalide (doit commencer par http:// ou https://).\nEx : /url https://exemple.com/page")
+        return
+    _submit_observable(url, "url", "URL")
+
+
+def cmd_domain(domain: str):
+    if "." not in domain or " " in domain:
+        telegram_send("❌ Domaine invalide.\nEx : /domain mauvais-site.com")
+        return
+    _submit_observable(domain, "domain", "Domaine")
+
+
+def cmd_hash(h: str):
+    if len(h) not in (32, 40, 64) or not all(c in "0123456789abcdefABCDEF" for c in h):
+        telegram_send("❌ Hash invalide (MD5/SHA1/SHA256 attendu).\nEx : /hash 131f95c5...")
+        return
+    _submit_observable(h, "hash", "Hash")
 
 
 def cmd_createcase(ip: str):
@@ -685,6 +746,12 @@ def handle_command(text: str, chat_id):
         cmd_whitelist(parts[1])
     elif cmd == "/analyze" and len(parts) >= 2:
         cmd_analyze(parts[1])
+    elif cmd == "/url" and len(parts) >= 2:
+        cmd_url(parts[1])
+    elif cmd == "/domain" and len(parts) >= 2:
+        cmd_domain(parts[1])
+    elif cmd == "/hash" and len(parts) >= 2:
+        cmd_hash(parts[1])
     elif cmd == "/createcase" and len(parts) >= 2:
         cmd_createcase(parts[1])
     elif cmd == "/silence" and len(parts) >= 2:

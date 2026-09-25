@@ -556,6 +556,24 @@ class TheHiveClient:
             }]
         )
 
+    def create_observable_case(self, value: str, data_type: str, title: str,
+                               description: str, severity: Severity,
+                               source: str = "Telegram") -> Optional[dict]:
+        """Crée un Case pour un observable de type explicite (url, domain, hash, ip...)."""
+        return self.create_case(
+            title=f"[SOC-AUTO] {title} — {value[:60]}",
+            description=f"{description}\n\n**Observable:** {value} ({data_type})\n**Source:** {source}\n**Heure:** {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+            severity=severity,
+            tags=["SOC", "automatise", source.lower(), data_type],
+            observables=[{
+                "dataType": data_type,
+                "data": value,
+                "message": f"Observable {data_type} soumis pour analyse",
+                "ioc": True,
+                "tlp": self.tlp
+            }]
+        )
+
     def create_malware_case(self, file_path: str, hash_value: str,
                             agent: str, description: str) -> Optional[dict]:
         """Crée un Case pour un malware avec observable hash."""
