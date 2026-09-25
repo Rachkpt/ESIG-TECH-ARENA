@@ -947,6 +947,30 @@ def telegram_send(msg: str, reply_markup: dict = None,
         log.error(f"Telegram erreur: {e}")
 
 
+def telegram_send_document(path: str, caption: str = "") -> bool:
+    """Envoie un fichier (PDF, etc.) dans le chat Telegram."""
+    if not Config.TELEGRAM_TOKEN or not Config.TELEGRAM_CHAT:
+        return False
+    if not os.path.exists(path):
+        log.error(f"telegram_send_document: fichier introuvable {path}")
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{Config.TELEGRAM_TOKEN}/sendDocument"
+        with open(path, "rb") as f:
+            files = {"document": (os.path.basename(path), f)}
+            data = {"chat_id": Config.TELEGRAM_CHAT}
+            if caption:
+                data["caption"] = caption[:1024]
+                data["parse_mode"] = "HTML"
+            r = requests.post(url, data=data, files=files, timeout=30)
+        if r.status_code == 200:
+            return True
+        log.error(f"Telegram sendDocument: HTTP {r.status_code} — {r.text[:200]}")
+    except Exception as e:
+        log.error(f"Telegram sendDocument erreur: {e}")
+    return False
+
+
 def inline_keyboard(buttons: list) -> dict:
     """Construit un clavier inline Telegram (boutons attachés à un message)."""
     return {

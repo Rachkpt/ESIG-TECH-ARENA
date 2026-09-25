@@ -128,3 +128,16 @@ def test_source_critique_jamais_autobloquee(monkeypatch):
         s.process_network_alert(a)
     # Jamais bloquée automatiquement malgré la récidive
     assert "192.168.10.10" not in u.load_state()["blocked_ips"]
+
+
+def test_rapport_pdf_genere():
+    """Le rapport PDF se génère et produit un fichier PDF valide."""
+    import soc_report
+    _reset_state()
+    out = os.path.join(_tmp, "rapport_test.pdf")
+    p = soc_report.generate_report_pdf(out)
+    assert os.path.exists(p)
+    with open(p, "rb") as f:
+        head = f.read(8)
+    assert head.startswith(b"%PDF-"), "En-tête PDF invalide"
+    assert os.path.getsize(p) > 500

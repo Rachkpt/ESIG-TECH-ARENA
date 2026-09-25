@@ -21,7 +21,7 @@ from soc_utils import (
     telegram_send, inline_keyboard, reply_keyboard, check_expired_blocks,
     firewall_list_blocked, get_native_blocks,
     get_pending_decisions, get_pending_decision, resolve_pending_decision,
-    bump_sector_stat, get_sector_stats, reset_offense
+    bump_sector_stat, get_sector_stats, reset_offense, telegram_send_document
 )
 from soc_clients import wazuh, thehive, cortex
 from soc_assets import sector_emoji, sector_label, all_assets, Criticality
@@ -90,6 +90,7 @@ def main_menu():
          ("🖥️ Agents", "cmd_agents")],
         [("⏳ Décisions en attente", "cmd_pending"),
          ("🏢 Secteurs", "cmd_sectors")],
+        [("📄 Rapport PDF", "cmd_pdf")],
         [("🔍 Analyser IP", "cmd_analyze_prompt"),
          ("📁 Créer Case", "cmd_case_prompt")],
         [("🔇 Silence 30min", "cmd_silence30")]
@@ -118,6 +119,7 @@ def main_menu():
         "<code>/malicious</code> — IPs malveillantes\n"
         "<code>/attente</code> — Décisions à valider (critique)\n"
         "<code>/secteurs</code> — SOC par secteur\n"
+        "<code>/pdf</code> — Rapport d'activité PDF\n"
         "<code>/silence MIN</code> — Couper notifs\n"
         "<code>/check</code> — Vérifier expirations\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -654,6 +656,24 @@ def cmd_pending():
         )
 
 
+def cmd_pdf():
+    """Génère le rapport d'activité SOC en PDF et l'envoie sur Telegram."""
+    telegram_send("📄 Génération du rapport PDF en cours...")
+    try:
+        from soc_report import generate_report_pdf
+        path = generate_report_pdf()
+    except Exception as e:
+        log.error(f"cmd_pdf: {e}")
+        telegram_send(f"⚠️ Échec de génération du rapport PDF : {str(e)[:200]}")
+        return
+    ok = telegram_send_document(
+        path,
+        caption="🛡️ <b>Rapport d'activité SOC</b>\nIP bloquées, secteurs, menaces et événements récents."
+    )
+    if not ok:
+        telegram_send("⚠️ Rapport généré mais échec de l'envoi (voir logs).")
+
+
 def cmd_sectors():
     """Tableau de bord par secteur d'infrastructure critique."""
     stats = get_sector_stats()
@@ -769,8 +789,10 @@ def handle_command(text: str, chat_id):
         "/agents": cmd_agents,
         "/attente": cmd_pending,
         "/secteurs": cmd_sectors,
+        "/pdf": cmd_pdf,
         "⏳ Décisions en attente": cmd_pending,
         "🏢 Secteurs": cmd_sectors,
+        "📄 Rapport PDF": cmd_pdf,
         # Labels du clavier permanent (texte exact envoyé par Telegram au clic)
         "⚠️ 10 Dernières Alertes": cmd_alerts,
         "🔍 IPs Ping & NMAP": cmd_scan_attempts,
@@ -845,6 +867,7 @@ def handle_callback(data: str, chat_id, cb_id):
         "cmd_agents": cmd_agents,
         "cmd_pending": cmd_pending,
         "cmd_sectors": cmd_sectors,
+        "cmd_pdf": cmd_pdf,
         "cmd_silence30": lambda: cmd_silence(30),
         "cmd_analyze_prompt": lambda: telegram_send("🔍 Envoyez: /analyze IP"),
         "cmd_case_prompt": lambda: telegram_send("📁 Envoyez: /createcase IP"),
