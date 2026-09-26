@@ -102,6 +102,12 @@ class Config:
     IMAP_VERIFY_SSL: bool = os.getenv("IMAP_VERIFY_SSL", "true").lower() == "true"
     MAIL_POLL_INTERVAL: int = int(os.getenv("MAIL_POLL_INTERVAL", "60"))
     MAIL_MAX_URLS: int      = int(os.getenv("MAIL_MAX_URLS", "5"))  # liens max analysés/email
+    # Fichier listant PLUSIEURS boîtes à surveiller (gitignoré, jamais poussé).
+    # Une ligne par compte : email:motdepasse  (voir mail_accounts.example.txt)
+    MAIL_ACCOUNTS_FILE: str = os.getenv(
+        "MAIL_ACCOUNTS_FILE",
+        os.path.join(_THIS_DIR, "mail_accounts.txt")
+    )
 
     # ── TELEGRAM ──────────────────────────────────────────
     TELEGRAM_TOKEN: str  = os.getenv("TELEGRAM_TOKEN", "")

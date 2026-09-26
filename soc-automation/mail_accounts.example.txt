@@ -1,0 +1,17 @@
+# ══════════════════════════════════════════════════════════════════
+#  mail_accounts.txt — Boîtes à surveiller (anti-phishing)
+# ──────────────────────────────────────────────────────────────────
+#  Copie ce fichier en "mail_accounts.txt" et mets tes vrais comptes.
+#  UNE LIGNE PAR BOÎTE, format :   email:motdepasse
+#  (les lignes vides et celles commençant par # sont ignorées)
+#
+#  ⚠️ mail_accounts.txt est gitignoré → tes mots de passe ne sont
+#     JAMAIS poussés sur GitHub.
+#
+#  Tous les comptes partagent IMAP_HOST/IMAP_PORT du .env (même serveur).
+# ══════════════════════════════════════════════════════════════════
+
+comptable@exemple.tg:MOT_DE_PASSE_ICI
+rh@exemple.tg:MOT_DE_PASSE_ICI
+it@exemple.tg:MOT_DE_PASSE_ICI
+direction@exemple.tg:MOT_DE_PASSE_ICI
