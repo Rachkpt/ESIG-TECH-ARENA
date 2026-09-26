@@ -155,7 +155,13 @@ def process_message(msg):
 
 
 def _connect() -> imaplib.IMAP4_SSL:
-    conn = imaplib.IMAP4_SSL(Config.IMAP_HOST, Config.IMAP_PORT)
+    import ssl
+    ctx = ssl.create_default_context()
+    if not Config.IMAP_VERIFY_SSL:
+        # iRedMail utilise souvent un certificat auto-signé en lab
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    conn = imaplib.IMAP4_SSL(Config.IMAP_HOST, Config.IMAP_PORT, ssl_context=ctx)
     conn.login(Config.IMAP_USER, Config.IMAP_PASS)
     conn.select(Config.IMAP_FOLDER)
     return conn

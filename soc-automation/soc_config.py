@@ -98,6 +98,8 @@ class Config:
     IMAP_USER: str   = os.getenv("IMAP_USER", "")          # ex: soc@tondomaine.tg
     IMAP_PASS: str   = os.getenv("IMAP_PASS", "")
     IMAP_FOLDER: str = os.getenv("IMAP_FOLDER", "INBOX")
+    # false = accepte un certificat auto-signé (cas iRedMail par défaut en lab)
+    IMAP_VERIFY_SSL: bool = os.getenv("IMAP_VERIFY_SSL", "true").lower() == "true"
     MAIL_POLL_INTERVAL: int = int(os.getenv("MAIL_POLL_INTERVAL", "60"))
     MAIL_MAX_URLS: int      = int(os.getenv("MAIL_MAX_URLS", "5"))  # liens max analysés/email
 
