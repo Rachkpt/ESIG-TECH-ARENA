@@ -90,6 +90,17 @@ class Config:
     GMAIL_SMTP_HOST: str = os.getenv("GMAIL_SMTP_HOST", "smtp.gmail.com")
     GMAIL_SMTP_PORT: int = int(os.getenv("GMAIL_SMTP_PORT", "587"))
 
+    # ── SURVEILLANCE BOÎTE MAIL (iRedMail / IMAP) ─────────
+    # Analyse automatique des liens reçus par email (anti-phishing).
+    MAIL_MONITOR_ENABLE: bool = os.getenv("MAIL_MONITOR_ENABLE", "false").lower() == "true"
+    IMAP_HOST: str   = os.getenv("IMAP_HOST", "")          # ex: mail.tondomaine.tg
+    IMAP_PORT: int   = int(os.getenv("IMAP_PORT", "993"))  # 993 = IMAPS
+    IMAP_USER: str   = os.getenv("IMAP_USER", "")          # ex: soc@tondomaine.tg
+    IMAP_PASS: str   = os.getenv("IMAP_PASS", "")
+    IMAP_FOLDER: str = os.getenv("IMAP_FOLDER", "INBOX")
+    MAIL_POLL_INTERVAL: int = int(os.getenv("MAIL_POLL_INTERVAL", "60"))
+    MAIL_MAX_URLS: int      = int(os.getenv("MAIL_MAX_URLS", "5"))  # liens max analysés/email
+
     # ── TELEGRAM ──────────────────────────────────────────
     TELEGRAM_TOKEN: str  = os.getenv("TELEGRAM_TOKEN", "")
     TELEGRAM_CHAT: str   = os.getenv("TELEGRAM_CHAT", "")

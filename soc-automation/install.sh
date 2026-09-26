@@ -142,11 +142,34 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+# Service optionnel : surveillance mail anti-phishing (Script 4)
+cat > /etc/systemd/system/soc-mail.service << 'EOF'
+[Unit]
+Description=SOC Mail Monitor (anti-phishing email)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/soc-automation
+ExecStart=/usr/bin/python3 /opt/soc-automation/mail_monitor.py
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # Recharger systemd
 systemctl daemon-reload
 
-# Activer les services
+# Activer les services (soc-mail activé seulement si MAIL_MONITOR_ENABLE=true)
 systemctl enable soc-script1 soc-script2 soc-telegram
+systemctl enable soc-mail 2>/dev/null || true
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
