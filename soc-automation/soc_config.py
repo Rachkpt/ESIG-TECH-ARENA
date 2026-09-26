@@ -97,7 +97,11 @@ class Config:
     IMAP_PORT: int   = int(os.getenv("IMAP_PORT", "993"))  # 993 = IMAPS
     IMAP_USER: str   = os.getenv("IMAP_USER", "")          # ex: soc@tondomaine.tg
     IMAP_PASS: str   = os.getenv("IMAP_PASS", "")
-    IMAP_FOLDER: str = os.getenv("IMAP_FOLDER", "INBOX")
+    # Dossiers à surveiller, séparés par des virgules. Par défaut on inclut
+    # aussi le dossier Junk/Pourriel : un vrai phishing y est souvent classé
+    # automatiquement par le serveur (SpamAssassin/rspamd) et n'apparaîtrait
+    # jamais dans INBOX. Les noms iRedMail/Dovecot usuels sont tolérés.
+    IMAP_FOLDER: str = os.getenv("IMAP_FOLDER", "INBOX,Junk")
     # false = accepte un certificat auto-signé (cas iRedMail par défaut en lab)
     IMAP_VERIFY_SSL: bool = os.getenv("IMAP_VERIFY_SSL", "true").lower() == "true"
     MAIL_POLL_INTERVAL: int = int(os.getenv("MAIL_POLL_INTERVAL", "120"))

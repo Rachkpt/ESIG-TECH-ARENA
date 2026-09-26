@@ -191,8 +191,40 @@ def _connect(user: str, passwd: str) -> imaplib.IMAP4_SSL:
         ctx.verify_mode = ssl.CERT_NONE
     conn = imaplib.IMAP4_SSL(Config.IMAP_HOST, Config.IMAP_PORT, ssl_context=ctx)
     conn.login(user, passwd)
-    conn.select(Config.IMAP_FOLDER)
     return conn
+
+
+# Noms de dossier Junk/Spam alternatifs à essayer si celui demandé n'existe pas
+# (Dovecot/iRedMail selon la langue et la config).
+_JUNK_ALIASES = {
+    "junk": ["Junk", "Spam", "Pourriel", "INBOX.Junk", "INBOX.Spam"],
+    "spam": ["Spam", "Junk", "Pourriel", "INBOX.Spam", "INBOX.Junk"],
+    "pourriel": ["Pourriel", "Junk", "Spam", "INBOX.Junk"],
+}
+
+
+def _select_folder(conn: imaplib.IMAP4_SSL, folder: str) -> bool:
+    """Sélectionne un dossier ; essaie des alias pour Junk/Spam. True si OK."""
+    candidates = [folder]
+    candidates += _JUNK_ALIASES.get(folder.strip().lower(), [])
+    seen = set()
+    for name in candidates:
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            typ, _ = conn.select(name)
+            if typ == "OK":
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _folders() -> list:
+    """Liste des dossiers à surveiller (INBOX,Junk...) depuis la config."""
+    raw = Config.IMAP_FOLDER or "INBOX"
+    return [f.strip() for f in raw.split(",") if f.strip()]
 
 
 def main():
@@ -226,21 +258,27 @@ def main():
         for user, passwd in accounts:
             try:
                 conn = _connect(user, passwd)
-                typ, data = conn.search(None, "UNSEEN")   # nouveaux messages
-                ids = data[0].split() if data and data[0] else []
-                for mid in ids:
-                    typ, msg_data = conn.fetch(mid, "(RFC822)")
-                    if typ != "OK" or not msg_data or not msg_data[0]:
+                total = 0
+                for folder in _folders():
+                    if not _select_folder(conn, folder):
+                        # dossier inexistant sur cette boîte (ex: pas de Junk) → on saute
                         continue
-                    msg = email.message_from_bytes(msg_data[0][1])
-                    try:
-                        process_message(msg, mailbox=user)
-                    except Exception as e:
-                        log.error(f"[{user}] Traitement message {mid}: {e}")
-                    conn.store(mid, "+FLAGS", "\\Seen")   # marque lu
+                    typ, data = conn.search(None, "UNSEEN")   # nouveaux messages
+                    ids = data[0].split() if data and data[0] else []
+                    for mid in ids:
+                        typ, msg_data = conn.fetch(mid, "(RFC822)")
+                        if typ != "OK" or not msg_data or not msg_data[0]:
+                            continue
+                        msg = email.message_from_bytes(msg_data[0][1])
+                        try:
+                            process_message(msg, mailbox=f"{user}/{folder}")
+                        except Exception as e:
+                            log.error(f"[{user}/{folder}] Traitement message {mid}: {e}")
+                        conn.store(mid, "+FLAGS", "\\Seen")   # marque lu
+                    if ids:
+                        log.info(f"[{user}/{folder}] {len(ids)} nouvel(aux) email(s) traité(s)")
+                        total += len(ids)
                 conn.logout()
-                if ids:
-                    log.info(f"[{user}] {len(ids)} nouvel(aux) email(s) traité(s)")
                 errors = 0
                 backoff = 0
             except Exception as e:
