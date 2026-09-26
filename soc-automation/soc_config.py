@@ -100,7 +100,7 @@ class Config:
     IMAP_FOLDER: str = os.getenv("IMAP_FOLDER", "INBOX")
     # false = accepte un certificat auto-signé (cas iRedMail par défaut en lab)
     IMAP_VERIFY_SSL: bool = os.getenv("IMAP_VERIFY_SSL", "true").lower() == "true"
-    MAIL_POLL_INTERVAL: int = int(os.getenv("MAIL_POLL_INTERVAL", "60"))
+    MAIL_POLL_INTERVAL: int = int(os.getenv("MAIL_POLL_INTERVAL", "120"))
     MAIL_MAX_URLS: int      = int(os.getenv("MAIL_MAX_URLS", "5"))  # liens max analysés/email
     # Fichier listant PLUSIEURS boîtes à surveiller (gitignoré, jamais poussé).
     # Une ligne par compte : email:motdepasse  (voir mail_accounts.example.txt)

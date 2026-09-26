@@ -221,6 +221,7 @@ def main():
     )
 
     errors = 0
+    backoff = 0   # secondes d'attente supplémentaire après erreurs réseau
     while True:
         for user, passwd in accounts:
             try:
@@ -241,14 +242,21 @@ def main():
                 if ids:
                     log.info(f"[{user}] {len(ids)} nouvel(aux) email(s) traité(s)")
                 errors = 0
+                backoff = 0
             except Exception as e:
                 errors += 1
                 log.error(f"[{user}] Boucle mail: {e}")
+                # Recul progressif : évite de marteler le serveur (et de se
+                # faire bannir par fail2ban) quand la connexion échoue.
+                backoff = min(600, (backoff or 30) * 2)
                 if errors >= 5:
                     telegram_send(f"⚠️ <b>Surveillance mail : {errors} erreurs</b>\n"
                                   f"Boîte <code>{user}</code> : {str(e)[:150]}", force=True)
                     errors = 0
-        time.sleep(Config.MAIL_POLL_INTERVAL)
+            # Petite pause ENTRE chaque boîte (connexions moins rapprochées)
+            time.sleep(3)
+        # Recul supplémentaire si des erreurs réseau se produisent
+        time.sleep(Config.MAIL_POLL_INTERVAL + backoff)
 
 
 if __name__ == "__main__":
