@@ -39,6 +39,7 @@ class WazuhClient:
         self.passwd = Config.WAZUH_PASS
         self._token = None
         self._token_expires = 0
+        self.last_error = ""   # dernière erreur API (pour diagnostic Telegram)
 
     def _get_token(self) -> Optional[str]:
         """Récupère ou renouvelle le token JWT."""
@@ -55,11 +56,20 @@ class WazuhClient:
             if r.status_code == 200:
                 self._token = r.json()["data"]["token"]
                 self._token_expires = now + 900
+                self.last_error = ""
                 return self._token
-            log.error(f"Wazuh auth échouée: {r.status_code}")
+            if r.status_code in (401, 403):
+                self.last_error = (f"Authentification refusée (HTTP {r.status_code}) — "
+                                   f"vérifie WAZUH_USER / WAZUH_PASS (compte API Wazuh, "
+                                   f"pas le compte admin de l'Indexer).")
+            else:
+                self.last_error = f"API Wazuh a répondu HTTP {r.status_code}"
+            log.error(f"Wazuh auth échouée: {r.status_code} — {r.text[:200]}")
         except requests.exceptions.ConnectionError:
+            self.last_error = f"Manager Wazuh injoignable sur {self.url} (port 55000 ouvert ?)"
             log.error(f"Wazuh injoignable: {self.url}")
         except Exception as e:
+            self.last_error = f"Erreur token : {str(e)[:120]}"
             log.error(f"Wazuh token erreur: {e}")
         return None
 
@@ -82,12 +92,16 @@ class WazuhClient:
                 verify=False, timeout=15
             )
             if r.status_code == 200:
+                self.last_error = ""
                 data = r.json().get("data", {})
                 return data.get("affected_items", [])
+            self.last_error = f"/agents a répondu HTTP {r.status_code}"
             log.error(f"Wazuh agents erreur: HTTP {r.status_code} — {r.text[:300]}")
         except requests.exceptions.ConnectionError:
+            self.last_error = f"Manager Wazuh injoignable sur {self.url} (port 55000 ouvert ?)"
             log.error(f"Wazuh manager injoignable pour /agents: {self.url}")
         except Exception as e:
+            self.last_error = f"Erreur /agents : {str(e)[:120]}"
             log.error(f"Wazuh agents: {e}")
         return []
 

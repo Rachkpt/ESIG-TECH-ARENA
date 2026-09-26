@@ -167,10 +167,14 @@ def cmd_agents():
     """Affiche le statut (up/down) de tous les agents Wazuh."""
     agents = wazuh.get_agents()
     if not agents:
+        reason = getattr(wazuh, "last_error", "") or "raison inconnue"
         telegram_send(
-            "⚠️ Impossible de récupérer les agents.\n"
-            "📋 Voir <code>journalctl -u soc-script1</code> ou "
-            "<code>journalctl -u soc-telegram</code> pour le détail exact de l'erreur API."
+            "⚠️ <b>Impossible de récupérer les agents Wazuh</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📌 Cause : {reason}\n"
+            f"🔧 Vérifie : <code>WAZUH_URL</code> (port 55000), "
+            f"<code>WAZUH_USER</code>/<code>WAZUH_PASS</code> (compte API), "
+            f"et que le manager est joignable."
         )
         return
 
