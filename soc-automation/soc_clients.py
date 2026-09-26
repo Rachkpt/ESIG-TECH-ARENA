@@ -51,7 +51,7 @@ class WazuhClient:
             r = requests.post(
                 f"{self.url}/security/user/authenticate",
                 auth=(self.user, self.passwd),
-                verify=False, timeout=10
+                verify=False, timeout=15
             )
             if r.status_code == 200:
                 self._token = r.json()["data"]["token"]
@@ -84,10 +84,17 @@ class WazuhClient:
         Récupère la liste des agents Wazuh et leur statut (active/disconnected/never_connected).
         Utilise l'API manager (endpoint réel, contrairement à /security/events).
         """
+        # Récupère le token d'abord : si ça échoue (timeout/injoignable/creds),
+        # on remonte la VRAIE cause plutôt qu'un 401 trompeur "No authorization
+        # token provided" (une requête sans token renverrait 401 à tort).
+        headers = self._headers()
+        if not headers:
+            # last_error a déjà été renseigné par _get_token()
+            return []
         try:
             r = requests.get(
                 f"{self.url}/agents",
-                headers=self._headers(),
+                headers=headers,
                 params={"limit": 500},
                 verify=False, timeout=15
             )
