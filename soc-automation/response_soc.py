@@ -259,7 +259,7 @@ def main():
         f"✅ Mail : {'✅' if mail.is_configured() else '❌'}\n"
         f"{warning_block}\n"
         f"🕐 {ts}\n"
-        f"🔰 By <b>12ak_H4ck</b>",
+        f"🔰 By <b>NetForce4</b>",
         force=True
     )
 

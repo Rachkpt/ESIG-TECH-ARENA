@@ -61,7 +61,7 @@ def persistent_keyboard():
     """
     # Les 4 boutons "10 Dernières Alertes", "IPs Ping & NMAP",
     # "IPs Malveillantes / Logs" et "IPs Bloquées" ont été RETIRÉS du
-    # clavier du bas (demande 12ak_H4ck). Leurs fonctions restent 100%
+    # clavier du bas (demande NetForce4). Leurs fonctions restent 100%
     # accessibles via le menu inline /menu et les commandes slash
     # /alerts /scan /malicious /blocked.
     return reply_keyboard([
@@ -123,7 +123,7 @@ def main_menu():
         "<code>/silence MIN</code> — Couper notifs\n"
         "<code>/check</code> — Vérifier expirations\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔰 By <b>12ak_H4ck</b>",
+        "🔰 By <b>NetForce4</b>",
         buttons=kb
     )
     # Active le clavier permanent en bas de l'écran
@@ -914,7 +914,7 @@ def main():
         sys.exit(1)
 
     log.info("═════════════════════════════════════════════")
-    log.info("  telegram_bot.py — DÉMARRÉ — By 12ak_H4ck")
+    log.info("  telegram_bot.py — DÉMARRÉ — By NetForce4")
     log.info("═════════════════════════════════════════════")
 
     # Purge le backlog getUpdates : on repart du DERNIER update en file

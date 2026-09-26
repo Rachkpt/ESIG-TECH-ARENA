@@ -277,4 +277,4 @@ Une fois la vérification finale propre (aucun paquet `wazuh` listé, `/var/osse
 
 ## Auteur
 
-**12ak_H4ck** — ESIG Tech Arena · Blue Team / SOC
+**NetForce4** — ESIG Tech Arena · Blue Team / SOC

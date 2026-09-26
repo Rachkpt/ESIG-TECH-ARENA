@@ -971,7 +971,7 @@ def main():
         f"✅ Intervalle : {Config.WAZUH_POLL_INTERVAL}s\n"
         f"✅ Niveau min : {Config.WAZUH_MIN_LEVEL}/15\n"
         f"🕐 {ts}\n"
-        f"🔰 By <b>12ak_H4ck</b>",
+        f"🔰 By <b>NetForce4</b>",
         force=True
     )
 

@@ -1,8 +1,21 @@
 # 🛡️ ESIG Tech Arena — SOC pour infrastructures critiques
 
+> 🏆 **Projet réalisé dans le cadre du hackathon ESIG Tech Arena** par la team **NetForce4**.
+>
 > **Thème : Sécurité des infrastructures critiques** (hôpitaux, banques, énergie/CEET).
 > SOC automatisé et souverain basé sur Wazuh, Suricata, Fail2ban, TheHive 5, Cortex, Grafana/Prometheus et un script Python d'automatisation (surveillance, réponse, bot Telegram).
 > Sa spécificité : une **réponse graduée par criticité** qui détecte les attaques informatiques **et industrielles (SCADA/Modbus)** sans jamais couper un service vital — l'humain reste dans la boucle pour les équipements critiques.
+
+## 👥 Équipe — NetForce4
+
+Projet développé pour le **hackathon ESIG Tech Arena** par :
+
+| Membre |
+|---|
+| ALEDJI Ar-Rachad |
+| AMEGAN-AYEH Bénédicte |
+| DASSANOU Emery Stéphane |
+| LAMBA Karol Steve |
 
 ## Ce qui distingue ce SOC (infrastructures critiques)
 
@@ -51,6 +64,11 @@
 | **Telegram Bot API** | Bot d'administration à distance | [core.telegram.org/bots/api](https://core.telegram.org/bots/api) |
 | **Script Python (`soc-automation/`)** | Corrélation, classification, réponse automatique, bot Telegram | voir [docs/08](docs/08-automatisation-soc/README.md) |
 
-## Auteur
+## Auteurs
 
-**12ak_H4ck** — ESIG Tech Arena · Blue Team / SOC
+Team **NetForce4** — Hackathon **ESIG Tech Arena** · Blue Team / SOC
+
+- ALEDJI Ar-Rachad
+- AMEGAN-AYEH Bénédicte
+- DASSANOU Emery Stéphane
+- LAMBA Karol Steve
