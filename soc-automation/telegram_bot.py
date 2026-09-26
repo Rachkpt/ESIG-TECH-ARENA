@@ -29,6 +29,27 @@ from soc_assets import sector_emoji, sector_label, all_assets, Criticality
 log = logging.getLogger("telegram_bot")
 API = f"https://api.telegram.org/bot{Config.TELEGRAM_TOKEN}"
 
+# ── Saisie en attente (flux "clic sur un bouton → colle la valeur") ──
+# Clé = chat_id (str), valeur = mode attendu ("url" | "file" | "unblock" |
+# "analyze_ip"). Quand un mode est en attente, le PROCHAIN message texte
+# (ou fichier) de l'admin est interprété comme la valeur, puis l'attente
+# est effacée. Un bot mono-admin → dictionnaire simple en mémoire suffit.
+_PENDING: dict = {}
+
+# Libellé du bouton → (mode, message d'invite affiché après le clic)
+ASK_PROMPTS = {
+    "url":        "🔗 <b>Analyser un lien</b>\nColle le lien (URL, domaine ou hash) à analyser :",
+    "file":       "📎 <b>Analyser un fichier</b>\nEnvoie / glisse le fichier à analyser ici :",
+    "unblock":    "🔓 <b>Débloquer une IP</b>\nColle l'adresse IP à débloquer :\n<i>(ou /blocked pour voir la liste)</i>",
+    "analyze_ip": "🔍 <b>Analyser une IP</b>\nColle l'adresse IP à analyser (Cortex) :",
+}
+
+
+def _ask(chat_id, mode: str):
+    """Met le bot en attente d'une saisie et affiche l'invite correspondante."""
+    _PENDING[str(chat_id)] = mode
+    telegram_send(ASK_PROMPTS[mode])
+
 
 # ╔══════════════════════════════════════════════════════════╗
 # ║                     SÉCURITÉ                             ║
@@ -69,7 +90,8 @@ def persistent_keyboard():
         ["📋 État du système", "📜 Dernières actions"],
         ["📊 Statistiques", "📁 Cases TheHive"],
         ["🧠 Rapport IA", "✅ Vérifier expirations"],
-        ["🖥️ Agents", "🔍 Lancer Cortex"],
+        ["🖥️ Agents", "🔍 Analyser une IP"],
+        ["🔗 Analyser un lien", "📎 Analyser un fichier"],
         ["🗂️ Case manuel", "⛔ Bloquer IP"],
         ["🚫 Bannir permanent", "✅ Whitelister"],
         ["🔇 Couper notifs"]
@@ -91,8 +113,11 @@ def main_menu():
         [("⏳ Décisions en attente", "cmd_pending"),
          ("🏢 Secteurs", "cmd_sectors")],
         [("📄 Rapport PDF", "cmd_pdf")],
-        [("🔍 Analyser IP", "cmd_analyze_prompt"),
-         ("📁 Créer Case", "cmd_case_prompt")],
+        [("🔗 Analyser un lien", "ask_url"),
+         ("📎 Analyser un fichier", "ask_file")],
+        [("🔍 Analyser une IP", "ask_ip"),
+         ("🔓 Débloquer une IP", "ask_unblock")],
+        [("📁 Créer Case", "cmd_case_prompt")],
         [("🔇 Silence 30min", "cmd_silence30")]
     ])
     telegram_send(
@@ -470,16 +495,52 @@ def cmd_hash(h: str):
     _submit_observable(h, "hash", "Hash")
 
 
+def _submit_pasted_link(value: str):
+    """Dispatch d'une valeur collée derrière le bouton 'Analyser un lien' :
+    détecte automatiquement URL / hash / domaine."""
+    v = value.strip()
+    if v.startswith("http://") or v.startswith("https://"):
+        cmd_url(v)
+    elif len(v) in (32, 40, 64) and all(c in "0123456789abcdefABCDEF" for c in v):
+        cmd_hash(v)
+    elif "." in v and " " not in v:
+        cmd_domain(v)
+    else:
+        telegram_send(
+            "❌ Format non reconnu. Colle un lien <code>http(s)://…</code>, "
+            "un domaine <code>exemple.com</code> ou un hash (MD5/SHA1/SHA256)."
+        )
+
+
+def _consume_pending(mode: str, value: str, chat_id):
+    """Interprète la valeur collée selon le mode en attente."""
+    value = (value or "").strip()
+    if not value:
+        telegram_send("❌ Valeur vide, réessaie.")
+        return
+    if mode == "url":
+        _submit_pasted_link(value)
+    elif mode == "unblock":
+        # accepte une IP seule ; ignore un éventuel texte collé autour
+        ip = value.split()[0]
+        cmd_unblock(ip)
+    elif mode == "analyze_ip":
+        cmd_analyze(value.split()[0])
+
+
 def handle_document(message: dict):
     """
     L'admin envoie un FICHIER au bot → on calcule son SHA256 et on lance
     l'analyse Cortex (analyzers hash : VirusTotal, Virusshare…) + IA, le
     tout renvoyé sur Telegram. Simple : juste glisser un fichier, aucune
-    commande ni bouton à connaître.
+    commande ni bouton à connaître. Fonctionne aussi bien après le bouton
+    '📎 Analyser un fichier' qu'en glissant directement un fichier.
     """
     chat_id = message["chat"]["id"]
     if not is_admin(chat_id):
         return
+    # Un fichier reçu satisfait/annule toute attente de saisie en cours.
+    _PENDING.pop(str(chat_id), None)
 
     doc = message.get("document") or {}
     file_id = doc.get("file_id")
@@ -819,6 +880,32 @@ def handle_command(text: str, chat_id):
         "🔇 Couper notifs": lambda: telegram_send("🔇 Envoyez: /silence MINUTES"),
     }
 
+    # ── Boutons "clic → colle la valeur" : arment une attente de saisie ──
+    ask_labels = {
+        "🔗 Analyser un lien": "url",
+        "📎 Analyser un fichier": "file",
+        "🔍 Analyser une IP": "analyze_ip",
+        "🔓 Débloquer une IP": "unblock",
+        "🔍 Lancer Cortex": "analyze_ip",
+    }
+    if text in ask_labels:
+        _ask(chat_id, ask_labels[text])
+        return
+
+    # ── Consommation d'une saisie attendue (valeur collée après un bouton) ──
+    mode = _PENDING.get(str(chat_id))
+    if mode:
+        # une commande / un autre bouton connu ANNULE l'attente (on ne piège pas l'admin)
+        if text.startswith("/") or text in simple:
+            _PENDING.pop(str(chat_id), None)
+        else:
+            _PENDING.pop(str(chat_id), None)
+            if mode == "file":
+                telegram_send("📎 J'attends un <b>fichier</b>, pas du texte. Glisse le fichier ici.")
+            else:
+                _consume_pending(mode, text, chat_id)
+            return
+
     if text in simple:
         simple[text]()
         return
@@ -877,7 +964,13 @@ def handle_callback(data: str, chat_id, cb_id):
         "cmd_case_prompt": lambda: telegram_send("📁 Envoyez: /createcase IP"),
     }
 
-    if data in actions:
+    # Boutons "clic → colle la valeur" (lien / fichier / IP à débloquer / IP à analyser)
+    ask_map = {"ask_url": "url", "ask_file": "file",
+               "ask_unblock": "unblock", "ask_ip": "analyze_ip"}
+
+    if data in ask_map:
+        _ask(chat_id, ask_map[data])
+    elif data in actions:
         actions[data]()
     elif data.startswith("approve_"):
         _apply_decision(data[8:], approve=True)
