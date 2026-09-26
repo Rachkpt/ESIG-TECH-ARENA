@@ -507,6 +507,9 @@ class SOCState:
     pending_decisions: list = field(default_factory=list)
     # Compteur de récidive par IP : {ip: {"count", "first_ts", "last_ts"}}
     offense_counter: dict = field(default_factory=dict)
+    # Liste noire des domaines/URLs détectés malveillants (anti-phishing).
+    # {valeur: {"type","reason","score","source","added_at"}}
+    blacklist: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -520,7 +523,8 @@ class SOCState:
             "processed_alerts": self.processed_alerts[-10000:],
             "alert_throttle": self.alert_throttle,
             "pending_decisions": self.pending_decisions[-200:],
-            "offense_counter": self.offense_counter
+            "offense_counter": self.offense_counter,
+            "blacklist": self.blacklist
         }
 
 

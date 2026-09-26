@@ -21,7 +21,8 @@ from soc_utils import (
     telegram_send, inline_keyboard, reply_keyboard, check_expired_blocks,
     firewall_list_blocked, get_native_blocks,
     get_pending_decisions, get_pending_decision, resolve_pending_decision,
-    bump_sector_stat, get_sector_stats, reset_offense, telegram_send_document
+    bump_sector_stat, get_sector_stats, reset_offense, telegram_send_document,
+    get_blacklist, remove_from_blacklist
 )
 from soc_clients import wazuh, thehive, cortex
 from soc_assets import sector_emoji, sector_label, all_assets, Criticality
@@ -112,7 +113,8 @@ def main_menu():
          ("🖥️ Agents", "cmd_agents")],
         [("⏳ Décisions en attente", "cmd_pending"),
          ("🏢 Secteurs", "cmd_sectors")],
-        [("📄 Rapport PDF", "cmd_pdf")],
+        [("📄 Rapport PDF", "cmd_pdf"),
+         ("🚫 Liste noire", "cmd_blacklist")],
         [("🔗 Analyser un lien", "ask_url"),
          ("📎 Analyser un fichier", "ask_file")],
         [("🔍 Analyser une IP", "ask_ip"),
@@ -585,6 +587,28 @@ def handle_document(message: dict):
     _submit_observable(sha256, "hash", f"Fichier {file_name}")
 
 
+def cmd_blacklist():
+    """Affiche la liste noire des domaines/liens malveillants + boutons retrait."""
+    bl = get_blacklist()
+    if not bl:
+        telegram_send(
+            "✅ <b>Liste noire vide</b>\n"
+            "Aucun domaine malveillant détecté pour l'instant.\n"
+            "<i>Les liens reçus par email jugés malveillants seront ajoutés ici automatiquement.</i>"
+        )
+        return
+    # tri par date d'ajout la plus récente (via ts)
+    items = sorted(bl.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)
+    lines = [f"🚫 <b>LISTE NOIRE ({len(bl)} domaine(s))</b>", "━━━━━━━━━━━━━━━━━━━━━━━━"]
+    buttons = []
+    for domain, info in items[:20]:
+        score = info.get("score", 0)
+        added = info.get("added_at", "?")
+        lines.append(f"\n🔴 <code>{domain}</code>\n   Score {score}/100 · ajouté {added}")
+        buttons.append([(f"🗑️ Retirer {domain[:24]}", f"unbl_{domain}")])
+    telegram_send("\n".join(lines), reply_markup=inline_keyboard(buttons) if buttons else None)
+
+
 def cmd_createcase(ip: str):
     if not is_valid_ip(ip):
         telegram_send(f"❌ IP invalide: <code>{ip}</code>")
@@ -855,6 +879,8 @@ def handle_command(text: str, chat_id):
         "/attente": cmd_pending,
         "/secteurs": cmd_sectors,
         "/pdf": cmd_pdf,
+        "/blacklist": cmd_blacklist,
+        "🚫 Liste noire": cmd_blacklist,
         "⏳ Décisions en attente": cmd_pending,
         "🏢 Secteurs": cmd_sectors,
         "📄 Rapport PDF": cmd_pdf,
@@ -959,6 +985,7 @@ def handle_callback(data: str, chat_id, cb_id):
         "cmd_pending": cmd_pending,
         "cmd_sectors": cmd_sectors,
         "cmd_pdf": cmd_pdf,
+        "cmd_blacklist": cmd_blacklist,
         "cmd_silence30": lambda: cmd_silence(30),
         "cmd_analyze_prompt": lambda: telegram_send("🔍 Envoyez: /analyze IP"),
         "cmd_case_prompt": lambda: telegram_send("📁 Envoyez: /createcase IP"),
@@ -981,6 +1008,12 @@ def handle_callback(data: str, chat_id, cb_id):
         for ip in list(state["blocked_ips"].keys()):
             unblock_ip(ip, source="admin", notify=False)
         telegram_send("✅ Toutes les IPs débloquées")
+    elif data.startswith("unbl_"):
+        domain = data[5:]
+        if remove_from_blacklist(domain):
+            telegram_send(f"✅ <code>{domain}</code> retiré de la liste noire.")
+        else:
+            telegram_send(f"⚠️ <code>{domain}</code> introuvable dans la liste noire.")
     elif data.startswith("unblock_"):
         cmd_unblock(data[8:])
     elif data.startswith("prolong_"):

@@ -179,6 +179,43 @@ def process_case(case: dict):
                     force=True
                 )
 
+    # ── 6b. Auto-blacklist des liens/domaines malveillants ─
+    # Verdict malveillant sur une URL/domaine (souvent un lien reçu par
+    # email) → le domaine passe en LISTE NOIRE automatiquement + alerte.
+    # Un lien propre est simplement AUTORISÉ (log discret, pas de spam).
+    if data_type in ("url", "domain", "fqdn"):
+        from soc_utils import add_to_blacklist as _bl, is_blacklisted as _is_bl
+        category = extra.get("category", data_type)
+        is_email = category == "email_phishing"
+        if malicious_count > 0:
+            already = _is_bl(observable_data)
+            domain = _bl(
+                observable_data, data_type,
+                reason=f"Cortex: {malicious_count}/{len(results)} analyzer(s) malveillant(s)",
+                score=max((r.score for r in results), default=0),
+                source="response-cortex"
+            )
+            if domain and not already:
+                telegram_send(
+                    f"🚫 <b>LIEN MALVEILLANT — DOMAINE BLACKLISTÉ</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🔗 Domaine : <code>{domain}</code>\n"
+                    f"{'📧 Origine : email reçu' + chr(10) if is_email else ''}"
+                    f"📁 Case : <b>#{case_num}</b>\n"
+                    f"🚨 Analyzers malveillants : {malicious_count}/{len(results)}\n"
+                    f'🔗 <a href="{detail_url}">Voir sur VirusTotal</a>\n'
+                    f"✅ Ajouté à la liste noire (/blacklist pour gérer)\n"
+                    f"🕐 {ts}",
+                    force=True
+                )
+            add_log("BLACKLIST", f"Domaine {domain or observable_data} blacklisté (case #{case_num})",
+                    observable_label, "blacklist")
+        else:
+            # Lien propre → autorisé. Log discret uniquement (pas d'alerte).
+            log.info(f"Lien PROPRE autorisé : {observable_label} (case #{case_num})")
+            add_log("LIEN_AUTORISE", f"Lien propre autorisé (case #{case_num})",
+                    observable_label, extra.get("category", data_type))
+
     # ── 7. Mettre à jour TheHive ───────────────────────────
     # Préparer le commentaire
     analyzers_txt = "\n".join([

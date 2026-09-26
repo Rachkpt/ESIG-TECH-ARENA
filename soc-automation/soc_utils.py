@@ -160,6 +160,77 @@ def save_state(state: dict):
 
 
 # ╔══════════════════════════════════════════════════════════╗
+# ║        LISTE NOIRE DOMAINES / URLs (anti-phishing)        ║
+# ╚══════════════════════════════════════════════════════════╝
+
+def _domain_of(value: str) -> str:
+    """Extrait le domaine (host) d'une URL, ou renvoie la valeur telle quelle
+    si c'est déjà un domaine. Retire le port éventuel et met en minuscules."""
+    v = (value or "").strip().lower()
+    if "://" in v:
+        v = v.split("://", 1)[1]
+    v = v.split("/", 1)[0]          # retire le chemin
+    v = v.split("@", 1)[-1]         # retire un éventuel user:pass@
+    v = v.split(":", 1)[0]          # retire le port
+    return v.strip(". ")
+
+
+def add_to_blacklist(value: str, data_type: str, reason: str = "",
+                     score: int = 0, source: str = "auto") -> str:
+    """Ajoute un domaine (déduit de l'URL) à la liste noire. Renvoie le
+    domaine blacklisté, ou "" si rien n'a pu être extrait."""
+    import time as _time
+    domain = _domain_of(value)
+    if not domain or "." not in domain:
+        return ""
+    state = load_state()
+    bl = state.setdefault("blacklist", {})
+    entry = bl.get(domain, {})
+    entry.update({
+        "type": data_type,
+        "reason": reason or entry.get("reason", ""),
+        "score": max(int(score or 0), int(entry.get("score", 0))),
+        "source": source,
+        "added_at": entry.get("added_at") or datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        "hits": int(entry.get("hits", 0)) + 1,
+        "last_url": value[:200],
+        "ts": _time.time(),
+    })
+    bl[domain] = entry
+    state["blacklist"] = bl
+    save_state(state)
+    return domain
+
+
+def remove_from_blacklist(value: str) -> bool:
+    """Retire un domaine de la liste noire (accepte une URL ou un domaine)."""
+    domain = _domain_of(value)
+    state = load_state()
+    bl = state.get("blacklist", {})
+    # tolérance : on tente le domaine exact, sinon la valeur brute
+    key = domain if domain in bl else (value.strip().lower() if value.strip().lower() in bl else None)
+    if not key:
+        return False
+    del bl[key]
+    state["blacklist"] = bl
+    save_state(state)
+    return True
+
+
+def is_blacklisted(value: str) -> bool:
+    """True si le domaine (déduit de la valeur) est déjà en liste noire."""
+    domain = _domain_of(value)
+    if not domain:
+        return False
+    return domain in load_state().get("blacklist", {})
+
+
+def get_blacklist() -> dict:
+    """Renvoie la liste noire {domaine: infos}."""
+    return load_state().get("blacklist", {})
+
+
+# ╔══════════════════════════════════════════════════════════╗
 # ║                    JOURNALISATION                        ║
 # ╚══════════════════════════════════════════════════════════╝
 
